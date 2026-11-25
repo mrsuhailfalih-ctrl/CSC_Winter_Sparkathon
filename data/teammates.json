@@ -1,0 +1,9 @@
+[
+  {"name":"Maya Chen","role":"Frontend Builder","skills":["React","Figma","HTML/CSS"]},
+  {"name":"Noah Williams","role":"ML Builder","skills":["Python","Machine Learning","Pitching"]},
+  {"name":"Priya Patel","role":"Product Designer","skills":["Figma","Pitching","HTML/CSS"]},
+  {"name":"Jordan Lee","role":"Data Developer","skills":["Python","Machine Learning","Data Analysis"]},
+  {"name":"Sam Rivera","role":"Full-Stack Builder","skills":["Python","React","HTML/CSS"]},
+  {"name":"Alex Kim","role":"UX Researcher","skills":["Figma","Pitching","Research"]},
+  {"name":"Taylor Morgan","role":"Mentor","skills":["Python","Machine Learning","Pitching","React"]}
+]
