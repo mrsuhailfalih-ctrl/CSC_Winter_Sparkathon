@@ -22,7 +22,7 @@ def load_json(filename):
         return json.load(file)
 
 
-st.title("⚡ AI Hackathon Finder & Teammate Matcher")
+st.title(" AI Hackathon Finder & Teammate Matcher")
 st.markdown(
     "Find beginner-friendly hackathons, build a balanced team, "
     "and generate a practical project idea."
