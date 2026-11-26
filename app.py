@@ -8,8 +8,8 @@ from utils.live_search import find_hackathons
 
 st.set_page_config(page_title="Hackathon Finder AI", page_icon="🔎", layout="wide")
 st.title("🔎 Live Hackathon Finder")
-st.write("Search the web for specific hackathon events in your preferred time period.")
-st.caption("Search and AI summaries are not authoritative. Verify event dates, eligibility, costs, and registration on the organizer's official page.")
+st.write("Search the web for hackathons in your preferred time period.")
+st.caption("Search and AI summaries are not authoritative. Confirm event dates, eligibility, costs, and registration on the organizer's official page.")
 
 left, right = st.columns(2)
 with left:
@@ -20,7 +20,7 @@ with right:
     st.markdown("#### When can you participate?")
     start_date = st.date_input("Earliest event date", key="period_start")
     end_date = st.date_input("Latest event date", key="period_end")
-    st.caption("Search results without a clearly stated event date are marked as unconfirmed, not assumed to match.")
+    use_ollama = st.checkbox("Use optional local Ollama AI summaries", value=False, help="Off by default so searching works without installing/running a model. Search and local ranking are always available for free.")
 
 if age < 18:
     st.warning("Some events require parental consent or have additional rules for minors.")
@@ -32,7 +32,9 @@ if st.button("Search live web", type="primary", use_container_width=True):
         st.error("The earliest date must be on or before the latest date.")
     else:
         with st.spinner("Searching and filtering for specific event pages..."):
-            st.session_state["live_search_result"] = find_hackathons(interests, details, start_date, end_date)
+            st.session_state["live_search_result"] = find_hackathons(
+                interests, details, start_date, end_date, use_ollama=use_ollama
+            )
 
 result = st.session_state.get("live_search_result")
 if result:
@@ -44,9 +46,11 @@ if result:
         st.success(f"Found {len(result['results'])} distinct event-page candidates after removing guides, FAQs, directories, and duplicate links.")
         if result.get("ai_available"):
             st.caption("Ollama added short relevance notes. Dates and eligibility still need official-page verification.")
-        elif result.get("ai_message"):
-            st.warning(result["ai_message"] + " Search results are still shown without AI notes.")
-        st.caption("No generated scores. One result is shown per likely event; links come from live search and may not be the organizer's official page.")
+        elif use_ollama and result.get("ai_message"):
+            st.info(result["ai_message"] + " Search results remain available using the free local ranker.")
+        else:
+            st.caption("Using the built-in free local ranker. Ollama is optional and is not required for search.")
+        st.caption("No generated scores. Results are deduplicated and ranked by explicit date evidence and matching terms; sources may not be official.")
 
         for item in result["results"]:
             st.markdown(f"### {item['name']}")
