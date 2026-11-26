@@ -1,6 +1,10 @@
 # Hackathon Finder AI
 
-Streamlit app for discovering hackathons through public web search. It filters editorial/guide pages and clear stale editions, normalizes tracking links, merges likely duplicates, and ranks using free local keyword and date rules. Optional Ollama summaries require a model installed on the machine running the app; the app works without it.
+## Search produced no results?
+
+The app now tries multiple progressively broader public-web queries and reports a useful message when none returns event pages. Try a wider date range and shorter terms such as `AI` or `student`. Public search is not guaranteed: the free upstream service can rate-limit or temporarily return no results.
+
+Search results are filtered for obvious guide/news/archive pages, stale editions, and duplicate links. Because search snippets are imperfect, events without a clear date are retained but marked **date unconfirmed** rather than silently discarded. The app cannot guarantee every result is current—verify organizer pages.
 
 ## Run locally
 
@@ -11,29 +15,6 @@ python -m pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Windows PowerShell activation: `.venv\\Scripts\\Activate.ps1`.
+Windows PowerShell: `.venv\\Scripts\\Activate.ps1`.
 
-## About a free built-in AI model
-
-There is no reliable way to provide public, hosted LLM inference at $0 with no installation or server: model weights may be open-source, but serving them requires compute. This app therefore does not pretend a remote AI model is free. The default built-in search ranker runs locally as ordinary Python code without Ollama or model downloads. Optionally, run Ollama locally for AI-written relevance notes:
-
-```bash
-ollama pull qwen2.5:7b
-ollama serve
-```
-
-Enable **Use optional local Ollama AI summaries**. If Ollama is not installed, running, or has no model, the app continues with local filtering and ranking.
-
-## Search quality and limitations
-
-Search queries explicitly target registration pages and exclude common guide/FAQ/recap terms. Results from guide/blog/archive paths and obvious retrospective or out-of-period editions are filtered. Tracking links are normalized and likely duplicate event titles are merged. Explicit dates are compared with the requested window; undated results are labeled unconfirmed. Search snippets can still be stale or wrong, so check the event's official page.
-
-## Age-rule review
-
-Every result offers the official page and age-rule evidence/review workflow. Extracted text is only a clue. Read the organizer's current rules and manually confirm eligibility; the app does not certify it.
-
-## Tests
-
-```bash
-python -m unittest discover -s tests -v
-```
+Search and ranking use free Python logic and the public `ddgs` search client. Optional Ollama summaries require Ollama and a model installed locally; the app works without it. There is no reliably available public LLM service that can be promised both effective and 100% free; hosted inference needs compute. The default local ranker has no model or API costs.

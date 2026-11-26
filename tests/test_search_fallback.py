@@ -4,15 +4,7 @@ from unittest.mock import patch
 
 import requests
 
-from utils.live_search import (
-    _clean_result,
-    _merge_and_dedupe,
-    _normalize_url,
-    _tokens,
-    analyze_with_ollama,
-    find_hackathons,
-    search_hackathons,
-)
+from utils.live_search import _clean_result, _merge_and_dedupe, _normalize_url, _tokens, analyze_with_ollama, find_hackathons, search_hackathons
 
 
 class SearchQualityTests(unittest.TestCase):
@@ -34,12 +26,21 @@ class SearchQualityTests(unittest.TestCase):
         self.assertEqual(len(results), 1)
 
     @patch("utils.live_search.DDGS")
+    def test_search_retries_broad_queries_when_strict_query_errors(self, ddgs_class):
+        search = ddgs_class.return_value.__enter__.return_value
+        search.text.side_effect = [RuntimeError("blocked"), RuntimeError("blocked"), RuntimeError("blocked"), RuntimeError("blocked"),
+                                   [{"title": "Student Hackathon Registration", "href": "https://event.example/register", "body": "Registration is open."}], []]
+        results = search_hackathons("quantum AI", "beginner, virtual, free", date(2026, 6, 1), date(2026, 8, 31))
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["date_fit"], None)
+
+    @patch("utils.live_search.DDGS")
     def test_filters_past_edition_and_prioritizes_requested_dates(self, ddgs_class):
         search = ddgs_class.return_value.__enter__.return_value
         search.text.side_effect = [[
             {"title": "2024 AI Hackathon Registration", "href": "https://event.example/2024", "body": "The hackathon was held on June 2, 2024."},
             {"title": "Future AI Hackathon Registration 2026", "href": "https://event.example/2026", "body": "June 16, 2026. Register now."},
-        ], []]
+        ], [], [], []]
         results = search_hackathons("AI", "student", date(2026, 6, 1), date(2026, 8, 31))
         self.assertEqual(len(results), 1)
         self.assertIn("2026", results[0]["name"])
@@ -47,16 +48,11 @@ class SearchQualityTests(unittest.TestCase):
 
     @patch("utils.live_search.requests.get", side_effect=requests.ConnectionError)
     def test_ollama_not_running_is_graceful(self, _):
-        result = analyze_with_ollama(
-            [{"id": "abc", "name": "Test Hackathon", "url": "https://example.org", "snippet": "Hackathon"}],
-            "AI", date(2026, 1, 1), date(2026, 12, 31),
-        )
+        result = analyze_with_ollama([{"id": "abc", "name": "Test Hackathon", "url": "https://example.org", "snippet": "Hackathon"}], "AI", date(2026, 1, 1), date(2026, 12, 31))
         self.assertFalse(result["available"])
         self.assertIn("not running", result["message"])
 
-    @patch("utils.live_search.search_hackathons", return_value=[
-        {"id": "abc", "name": "AI Hackathon", "url": "https://example.org", "snippet": "AI hackathon registration", "date_fit": None, "date_match": "unknown", "reason": ""}
-    ])
+    @patch("utils.live_search.search_hackathons", return_value=[{"id": "abc", "name": "AI Hackathon", "url": "https://example.org", "snippet": "AI hackathon registration", "date_fit": None, "date_match": "unknown", "reason": ""}])
     def test_search_does_not_depend_on_ollama(self, _):
         result = find_hackathons("AI", "student", date(2026, 1, 1), date(2026, 12, 31))
         self.assertFalse(result["error"])
