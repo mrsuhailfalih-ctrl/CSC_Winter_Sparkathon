@@ -1,31 +1,24 @@
-# AI Hackathon Finder
+# Hackathon Finder AI
 
-A Streamlit app for discovering hackathons. Its main workflow uses Backboard AI to search for events based on your prompt and preferences; a small clearly labeled sample dataset is available for offline browsing. The app does not match teammates.
+A focused Streamlit AI assistant: describe the hackathon you want, and it recommends relevant events. It does not include teammate matching, sample listings, or other discovery tools. Recommendations depend on Backboard AI and its web-search capability; verify event details with the official organizer.
 
 ## Run locally
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
+source .venv/bin/activate  # Git Bash/macOS/Linux; Windows PowerShell: .venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 streamlit run app.py
 ```
 
 ## Configure Backboard AI
 
-Create a local `.env` file in the project root (do not commit it):
+Create a `.env` file next to `app.py` (keep it private and do not commit it):
 
 ```text
 BACKBOARD_API_KEY=your_key_here
-# Optional, if your Backboard account uses a different endpoint:
+# Optional if your account uses a different endpoint:
 BACKBOARD_API_URL=https://your-backboard-endpoint
 ```
 
-On Streamlit Community Cloud, add the same values under **App settings → Secrets**:
-
-```toml
-BACKBOARD_API_KEY = "your_key_here"
-# BACKBOARD_API_URL = "https://your-backboard-endpoint"
-```
-
-The API endpoint and request fields are configurable/in `utils/ai_engine.py`; confirm them against the endpoint and API schema provided by Backboard. When AI is not configured or unavailable, the app still lets you search and filter the sample dataset. Sample listings are illustrative, not verified current events.
+The Backboard endpoint and request fields in `utils/ai_engine.py` must match the API schema for your account.
