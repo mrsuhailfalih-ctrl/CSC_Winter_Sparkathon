@@ -1,6 +1,6 @@
 # Hackathon Finder AI
 
-Streamlit app that performs live web search for hackathons, asks a locally hosted Ollama model to assess result relevance and date evidence, and provides an age-rule evidence/review section for every result.
+Streamlit app for live hackathon discovery. It filters editorial guides, FAQs, directories, normalizes tracking links, and deduplicates results that appear to describe the same event. It uses Ollama locally for optional short relevance notes; search, filtering, and age review remain available if Ollama is offline.
 
 ## Run locally
 
@@ -12,29 +12,35 @@ ollama pull qwen2.5:7b
 ollama serve
 ```
 
-In another terminal, run:
+In another terminal:
 
 ```bash
 streamlit run app.py
 ```
 
-Windows PowerShell activation: `.venv\\Scripts\\Activate.ps1`.
+Windows activation: `.venv\\Scripts\\Activate.ps1`.
 
-Set `OLLAMA_MODEL` and `OLLAMA_BASE_URL` in the environment if needed. Ollama and Qwen weights are free to run locally (hardware/internet are still required). The `ddgs` open-source client performs public DuckDuckGo web searches without an API key; availability/rate limits depend on the upstream service and can change. GitHub API keys are not used for web search.
+If Ollama reports unavailable, verify it is running and the model is installed:
 
-## Search and AI behavior
+```bash
+ollama list
+ollama pull qwen2.5:7b
+```
 
-- Enter interests, a requested date range, and extra details.
-- The app searches live web results and shows their source URLs and snippets.
-- Qwen/Ollama annotates the results using only the supplied search data. The app preserves URLs and never treats model output as verified facts.
-- Search results are not guaranteed to be official, current, or complete. No numeric match score is shown.
-- If Ollama is unavailable, live results still appear without AI annotations.
+Ollama is local and does not require an API key. Live web search uses the `ddgs` client and its public upstream service; rate limits and availability can change.
+
+## Search quality
+
+- Enter a requested date range, interests, and additional preferences.
+- The search makes focused queries and filters obvious guides, FAQs, directories, and news pages.
+- Tracking parameters/fragments are removed, and near-duplicate event titles are merged to one result/link.
+- Dates are only matched when a date is explicitly present in returned search text. Otherwise they remain unconfirmed.
+- Ollama adds a short explanation, not a match score. Its output cannot establish event dates or age eligibility.
+- Search-result URLs may not be official. Open and confirm the organizer's event page.
 
 ## Age-rule review
 
-Every result includes an **Official page and age-rule review** section. The user can fetch possible age-related text from the source page, inspect it, and manually record age bounds after checking the official rules. Age comparison uses only the user's recorded rule. Unknown rules remain unknown; extracted text does not certify eligibility. Reviews are session-only.
-
-The page checker only fetches public HTTPS HTML, caps response size, rejects private network destinations and cross-host redirects, and does not send the user's age to the event website. Dynamic pages may not expose readable text; check those rules manually.
+Every result retains an official-page and age-rule review section. Fetch possible age-related text, read the organizer's rules, and record the age bounds yourself. The app compares your age with only your human-entered rule. Reviews are session-only and are not an eligibility certification.
 
 ## Tests
 
@@ -42,6 +48,4 @@ The page checker only fetches public HTTPS HTML, caps response size, rejects pri
 python -m unittest discover -s tests -v
 ```
 
-## Privacy and limitations
-
-The user's age is not included in search queries. Search terms and additional details are sent to the public search provider. Ollama receives the result titles/snippets and preferences locally. Verify age rules, date, cost, deadlines, and registration on the event's official page.
+Search snippets can be outdated or misleading. Confirm event dates, age restrictions, costs, and registration status on organizer pages.
