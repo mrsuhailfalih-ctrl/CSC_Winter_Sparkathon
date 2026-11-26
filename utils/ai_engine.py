@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DEFAULT_BACKBOARD_API_URL = "https://app.backboard.io/api/v1/chat"
+GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
 
 def _get_setting(name: str, default: str = "") -> str:
@@ -21,48 +21,90 @@ def _get_setting(name: str, default: str = "") -> str:
         return default
 
 
-def query_backboard_ai(user_prompt: str):
-    """Recommend real hackathons relevant to the user's request."""
-    api_key = _get_setting("BACKBOARD_API_KEY")
+def query_gemini_ai(user_prompt: str) -> dict:
+    """Use Gemini, with Google Search grounding, to recommend hackathons."""
+    api_key = _get_setting("GEMINI_API_KEY")
+    model = _get_setting("GEMINI_MODEL")
+
     if not api_key:
         return {
             "error": True,
-            "message": "Backboard AI is not configured. Add BACKBOARD_API_KEY to your .env file.",
+            "message": "Gemini is not configured. Add GEMINI_API_KEY to your local .env file.",
+        }
+    if not model:
+        return {
+            "error": True,
+            "message": (
+                "Gemini model is not configured. Add GEMINI_MODEL using a model ID "
+                "available to your Google AI Studio API key."
+            ),
         }
 
-    api_url = _get_setting("BACKBOARD_API_URL", DEFAULT_BACKBOARD_API_URL)
     prompt = (
         "You are an assistant whose only task is recommending hackathons based on "
-        "the user's request. Recommend current, real events that fit. Use web search "
-        "when available and prioritize official organizer pages. Never invent event "
-        "names, dates, eligibility, costs, or links. For each recommendation, give "
-        "the event name, why it fits, dates or registration deadline when verifiable, "
-        "and its official link. If you cannot verify a detail, say so. If you cannot "
-        "find suitable events, say that instead of suggesting unrelated ones.\n\n"
+        "the user's request. Use Google Search to find current, real events. Prefer "
+        "official organizer pages. Never invent event names, dates, eligibility, costs, "
+        "or links. Recommend only events that fit. For each, include the event name, "
+        "why it fits, dates or registration deadline when verifiable, and official link. "
+        "Say when a detail cannot be verified. If you cannot find suitable events, say so.\n\n"
         f"User request: {user_prompt}"
     )
-
+    url = f"{GEMINI_API_BASE_URL}/{model}:generateContent"
     try:
         response = requests.post(
-            api_url,
-            json={"message": prompt, "memory": "Auto", "web_search": "Auto"},
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
+            url,
+            params={"key": api_key},
+            json={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "tools": [{"google_search": {}}],
             },
-            timeout=30,
+            timeout=60,
         )
-        response.raise_for_status()
-        return response.json()
-    except requests.RequestException as exc:
-        print(f"Backboard AI error: {exc}")
+        if not response.ok:
+            # Do not log the request URL: it contains the API key query parameter.
+            print(f"Gemini API returned HTTP {response.status_code}.")
+            return {
+                "error": True,
+                "message": (
+                    f"Gemini request failed (HTTP {response.status_code}). Check that "
+                    "the model ID is available to your key and that Google Search grounding "
+                    "is supported for it."
+                ),
+            }
+        data = response.json()
+    except requests.RequestException:
         return {
             "error": True,
-            "message": "Hackathon recommendations are temporarily unavailable. Please try again later.",
+            "message": "Could not reach Gemini. Check your internet connection and try again.",
         }
-    except ValueError as exc:
-        print(f"Backboard response parsing error: {exc}")
+    except ValueError:
         return {
             "error": True,
-            "message": "The AI service returned an unreadable response. Please try again later.",
+            "message": "Gemini returned an unreadable response. Please try again.",
         }
+
+    candidates = data.get("candidates", [])
+    if not candidates:
+        return {
+            "error": True,
+            "message": "Gemini did not return a recommendation. Try rephrasing your request.",
+        }
+
+    candidate = candidates[0]
+    parts = candidate.get("content", {}).get("parts", [])
+    answer = "\n".join(part["text"] for part in parts if part.get("text"))
+    if not answer.strip():
+        return {
+            "error": True,
+            "message": "Gemini returned no text recommendation. Please try again.",
+        }
+
+    sources = []
+    metadata = candidate.get("groundingMetadata", {})
+    for chunk in metadata.get("groundingChunks", []):
+        web = chunk.get("web", {})
+        source_url = web.get("uri")
+        if source_url and not any(item["url"] == source_url for item in sources):
+            sources.append({"title": web.get("title") or source_url, "url": source_url})
+
+    return {"error": False, "answer": answer, "sources": sources}

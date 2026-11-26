@@ -1,11 +1,11 @@
 import streamlit as st
 
-from utils.ai_engine import query_backboard_ai
+from utils.ai_engine import query_gemini_ai
 
 st.set_page_config(page_title="Hackathon Finder AI", page_icon="🔎", layout="centered")
-
 st.title("🔎 Hackathon Finder AI")
 st.write("Tell me what kind of hackathon you want, and I’ll recommend events that fit.")
+st.caption("Recommendations are AI-generated. Confirm dates, eligibility, and deadlines on the official event pages.")
 
 query = st.text_area(
     "What are you looking for?",
@@ -21,24 +21,13 @@ if st.button("Recommend hackathons", type="primary", use_container_width=True):
         st.warning("Describe the hackathon you’re looking for.")
     else:
         with st.spinner("Finding hackathons that fit your request..."):
-            result = query_backboard_ai(query.strip())
+            result = query_gemini_ai(query.strip())
 
-        if isinstance(result, dict) and result.get("error"):
+        if result.get("error"):
             st.error(result["message"])
-        elif isinstance(result, str):
-            st.markdown(result)
-        elif isinstance(result, dict):
-            answer = next(
-                (
-                    result[key]
-                    for key in ("response", "answer", "content", "message", "text")
-                    if isinstance(result.get(key), str) and result[key].strip()
-                ),
-                None,
-            )
-            if answer:
-                st.markdown(answer)
-            else:
-                st.error("The AI returned an unexpected response. Please try again.")
         else:
-            st.error("The AI returned an unexpected response. Please try again.")
+            st.markdown(result["answer"])
+            if result.get("sources"):
+                st.subheader("Sources")
+                for source in result["sources"]:
+                    st.markdown(f"- [{source['title']}]({source['url']})")
