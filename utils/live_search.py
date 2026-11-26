@@ -49,7 +49,9 @@ def _normalize_url(url: str) -> str:
 
 
 def _tokens(text: str) -> set[str]:
-    return {word for word in re.findall(r"[a-z0-9]+", text.lower()) - GENERIC_WORDS if len(word) > 2}
+    # re.findall returns a list; convert it to a set before subtracting stop words.
+    words = set(re.findall(r"[a-z0-9]+", text.lower()))
+    return {word for word in words - GENERIC_WORDS if len(word) > 2}
 
 
 def _event_date_evidence(text: str) -> list[date]:
