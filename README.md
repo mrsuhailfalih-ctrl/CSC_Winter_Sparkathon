@@ -1,6 +1,6 @@
 # Hackathon Finder AI
 
-A focused Streamlit app that uses Gemini to help users find hackathons matching their preferences. It does not require Google Search support, so it can work with Gemini models that support text generation. Without live web browsing, the AI cannot verify current event listings; check deadlines, eligibility, costs, and registration links on official event pages.
+A focused Streamlit app that uses Backboard to help users find hackathons matching their preferences. The app does not have live web browsing, so verify dates, eligibility, deadlines, costs, and registration links on official event pages.
 
 ## Run locally
 
@@ -11,14 +11,15 @@ python -m pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Configure Gemini
+## Configure Backboard
 
-1. With your parent/guardian's approval, create an API key in Google AI Studio and check the current usage/age terms and free-tier availability for your account.
-2. In the project folder, create a local `.env` file (it is ignored by Git) with the key and a model ID available to your key:
+1. In your Backboard dashboard, create an API key and choose a model/provider. Check the model's price and your credit balance before using it; a $5 balance does not guarantee a particular number of requests.
+2. In the project folder, create or edit a local `.env` file (ignored by Git) with the key and exact provider/model values shown by Backboard:
 
 ```text
-GEMINI_API_KEY=your_key_here
-GEMINI_MODEL=model-id-from-ai-studio
+BACKBOARD_API_KEY=your_backboard_key
+BACKBOARD_LLM_PROVIDER=provider_from_backboard
+BACKBOARD_MODEL_NAME=model_name_from_backboard
 ```
 
-Keep the key private. Never paste it into chat, commit it, or put it in browser-side code. This app sends a text-generation request only; it does not require a model with Google Search grounding. Use the exact API model ID shown in AI Studio.
+The app requires an explicit provider and model rather than silently selecting a potentially more expensive default. It sends concise prompts, but actual charges depend on the selected model and Backboard's current pricing. Keep the key private: never paste it into chat or commit it to GitHub. See [Backboard's model documentation](https://docs.backboard.io/concepts/models) and [Send Message API reference](https://docs.backboard.io/api-reference/threads/send-message) for current model names and request details.

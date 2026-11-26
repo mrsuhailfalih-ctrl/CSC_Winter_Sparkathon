@@ -5,7 +5,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+BACKBOARD_MESSAGE_URL = "https://app.backboard.io/api/threads/messages"
+MAX_USER_PROMPT_CHARS = 2000
 
 
 def _get_setting(name: str, default: str = "") -> str:
@@ -21,79 +22,90 @@ def _get_setting(name: str, default: str = "") -> str:
         return default
 
 
-def query_gemini_ai(user_prompt: str) -> dict:
-    """Use Gemini to suggest hackathons without requiring web-search support."""
-    api_key = _get_setting("GEMINI_API_KEY")
-    model = _get_setting("GEMINI_MODEL")
+def query_backboard_ai(user_prompt: str) -> dict:
+    """Use Backboard to suggest hackathons, with an explicitly selected model."""
+    api_key = _get_setting("BACKBOARD_API_KEY")
+    provider = _get_setting("BACKBOARD_LLM_PROVIDER")
+    model = _get_setting("BACKBOARD_MODEL_NAME")
 
     if not api_key:
         return {
             "error": True,
-            "message": "Gemini is not configured. Add GEMINI_API_KEY to your local .env file.",
+            "message": "Backboard is not configured. Add BACKBOARD_API_KEY to your local .env file.",
         }
-    if not model:
+    if not provider or not model:
         return {
             "error": True,
             "message": (
-                "Gemini model is not configured. Add GEMINI_MODEL using a model ID "
-                "available to your Google AI Studio API key."
+                "Choose a model in your Backboard dashboard and set both "
+                "BACKBOARD_LLM_PROVIDER and BACKBOARD_MODEL_NAME in .env."
             ),
         }
 
     prompt = (
-        "You are an assistant that helps users find hackathons matching their request. "
-        "You do not have live web browsing, so do not claim you searched the web or that "
-        "event details are current or verified. Do not invent event names, dates, deadlines, "
-        "eligibility, costs, or URLs. If you are not confident a particular event and its "
-        "details are real, say you cannot verify current listings and give useful search "
-        "terms or official event platforms to check instead. If the user provides event "
-        "links or details, help compare them against the user's preferences and clearly "
-        "identify anything that still needs checking. Be concise and explain why suggestions fit.\n\n"
-        f"User request: {user_prompt}"
+        "Help the user find hackathons matching their preferences. You do not have live "
+        "web browsing, so do not claim event details are current or verified. Do not invent "
+        "event names, dates, deadlines, eligibility, costs, or URLs. If you cannot confidently "
+        "verify a specific event, say so and provide useful search terms or official platforms. "
+        "Keep the response concise.\n\n"
+        f"User request: {user_prompt[:MAX_USER_PROMPT_CHARS]}"
     )
-    url = f"{GEMINI_API_BASE_URL}/{model}:generateContent"
+
     try:
         response = requests.post(
-            url,
-            params={"key": api_key},
-            json={"contents": [{"parts": [{"text": prompt}]}]},
-            timeout=60,
+            BACKBOARD_MESSAGE_URL,
+            headers={
+                "X-API-Key": api_key,
+                "Content-Type": "application/json",
+            },
+            json={
+                "content": prompt,
+                "llm_provider": provider,
+                "model_name": model,
+            },
+            timeout=45,
         )
         if not response.ok:
-            # Do not log the request URL: it contains the API key query parameter.
-            print(f"Gemini API returned HTTP {response.status_code}.")
+            # Avoid logging response bodies or request details that may contain sensitive data.
+            print(f"Backboard API returned HTTP {response.status_code}.")
             return {
                 "error": True,
                 "message": (
-                    f"Gemini request failed (HTTP {response.status_code}). Check your model ID, "
-                    "API key, and AI Studio quota."
+                    f"Backboard request failed (HTTP {response.status_code}). Check your API key, "
+                    "provider/model selection, and account credits."
                 ),
             }
         data = response.json()
     except requests.RequestException:
         return {
             "error": True,
-            "message": "Could not reach Gemini. Check your internet connection and try again.",
+            "message": "Could not reach Backboard. Check your internet connection and try again.",
         }
     except ValueError:
         return {
             "error": True,
-            "message": "Gemini returned an unreadable response. Please try again.",
+            "message": "Backboard returned an unreadable response. Please try again.",
         }
 
-    candidates = data.get("candidates", [])
-    if not candidates:
-        return {
-            "error": True,
-            "message": "Gemini did not return a recommendation. Try rephrasing your request.",
-        }
+    answer = None
+    if isinstance(data, dict):
+        for key in ("content", "response", "answer", "message", "text"):
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                answer = value
+                break
+            if isinstance(value, dict):
+                nested = value.get("content") or value.get("text")
+                if isinstance(nested, str) and nested.strip():
+                    answer = nested
+                    break
+    elif isinstance(data, str) and data.strip():
+        answer = data
 
-    parts = candidates[0].get("content", {}).get("parts", [])
-    answer = "\n".join(part["text"] for part in parts if part.get("text"))
-    if not answer.strip():
+    if not answer:
         return {
             "error": True,
-            "message": "Gemini returned no text recommendation. Please try again.",
+            "message": "Backboard returned an unexpected response. Please check the API setup and try again.",
         }
 
     return {"error": False, "answer": answer, "sources": []}
