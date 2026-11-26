@@ -1,25 +1,68 @@
 # Hackathon Finder AI
 
-A focused Streamlit app that uses Backboard to help users find hackathons matching their preferences. The app does not have live web browsing, so verify dates, eligibility, deadlines, costs, and registration links on official event pages.
+A Streamlit app that finds beginner-friendly hackathons from a local starter dataset, applies a basic age restriction filter, and optionally uses Ollama or Backboard for recommendation explanations.
 
 ## Run locally
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # Git Bash/macOS/Linux; Windows PowerShell: .venv\\Scripts\\Activate.ps1
+source .venv/bin/activate
 python -m pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Configure Backboard
+On Windows, activate the environment with:
 
-1. In your Backboard dashboard, create an API key and choose a model/provider. Check the model's price and your credit balance before using it; a $5 balance does not guarantee a particular number of requests.
-2. In the project folder, create or edit a local `.env` file (ignored by Git) with the key and exact provider/model values shown by Backboard:
-
-```text
-BACKBOARD_API_KEY=your_backboard_key
-BACKBOARD_LLM_PROVIDER=provider_from_backboard
-BACKBOARD_MODEL_NAME=model_name_from_backboard
+```powershell
+.venv\Scripts\Activate.ps1
 ```
 
-The app requires an explicit provider and model rather than silently selecting a potentially more expensive default. It sends concise prompts, but actual charges depend on the selected model and Backboard's current pricing. Keep the key private: never paste it into chat or commit it to GitHub. See [Backboard's model documentation](https://docs.backboard.io/concepts/models) and [Send Message API reference](https://docs.backboard.io/api-reference/threads/send-message) for current model names and request details.
+## Recommendation engines
+
+### Local, $0 offline mode
+
+No API key or external server is needed. It ranks the local dataset using interest keywords and explicit age fields.
+
+### Ollama
+
+Install Ollama and pull Qwen:
+
+```bash
+ollama pull qwen2.5:7b
+ollama serve
+```
+
+Optional environment variables:
+
+```text
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5:7b
+```
+
+Select **Ollama (local)** in the app.
+
+### Backboard
+
+Create a Backboard API key and choose an allowed provider/model. Add these values to a local `.env` file:
+
+```text
+BACKBOARD_API_KEY=your_key
+BACKBOARD_LLM_PROVIDER=provider_name
+BACKBOARD_MODEL_NAME=model_name
+```
+
+Backboard use may incur provider charges. The app's local mode remains free.
+
+## Age restrictions
+
+Age rules in `data/hackathons.json` are starter/example values except where a source is known. Some records intentionally have unknown eligibility. Unknown eligibility is never converted into a confirmed eligibility claim. Always verify rules on the official event page.
+
+For minors, reviewers should confirm parental consent, privacy rules, and official eligibility requirements before participating.
+
+## Privacy
+
+The app stores neither exact age nor submitted preferences permanently. The exact age is sent only to the selected local or remote recommendation service.
+
+## Safety warning
+
+The app does not live-browse the web or guarantee current event information. Replace and verify the starter records before production use.
