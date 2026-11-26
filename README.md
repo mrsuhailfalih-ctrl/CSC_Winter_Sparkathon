@@ -1,6 +1,6 @@
 # Hackathon Finder AI
 
-A focused Streamlit app that uses Gemini to recommend hackathons from a user's request. If Google Search grounding is available for the selected Gemini model, it can look for current events and provide source links. Always verify details with event organizers.
+A focused Streamlit app that uses Gemini to help users find hackathons matching their preferences. It does not require Google Search support, so it can work with Gemini models that support text generation. Without live web browsing, the AI cannot verify current event listings; check deadlines, eligibility, costs, and registration links on official event pages.
 
 ## Run locally
 
@@ -21,4 +21,4 @@ GEMINI_API_KEY=your_key_here
 GEMINI_MODEL=model-id-from-ai-studio
 ```
 
-Keep the key private. Never paste it into chat, commit it, or put it in browser-side code. Google Search grounding must be supported for the model and API project; if the request returns an error, check the model's tool support and your AI Studio quota/settings.
+Keep the key private. Never paste it into chat, commit it, or put it in browser-side code. This app sends a text-generation request only; it does not require a model with Google Search grounding. Use the exact API model ID shown in AI Studio.

@@ -22,7 +22,7 @@ def _get_setting(name: str, default: str = "") -> str:
 
 
 def query_gemini_ai(user_prompt: str) -> dict:
-    """Use Gemini, with Google Search grounding, to recommend hackathons."""
+    """Use Gemini to suggest hackathons without requiring web-search support."""
     api_key = _get_setting("GEMINI_API_KEY")
     model = _get_setting("GEMINI_MODEL")
 
@@ -41,12 +41,14 @@ def query_gemini_ai(user_prompt: str) -> dict:
         }
 
     prompt = (
-        "You are an assistant whose only task is recommending hackathons based on "
-        "the user's request. Use Google Search to find current, real events. Prefer "
-        "official organizer pages. Never invent event names, dates, eligibility, costs, "
-        "or links. Recommend only events that fit. For each, include the event name, "
-        "why it fits, dates or registration deadline when verifiable, and official link. "
-        "Say when a detail cannot be verified. If you cannot find suitable events, say so.\n\n"
+        "You are an assistant that helps users find hackathons matching their request. "
+        "You do not have live web browsing, so do not claim you searched the web or that "
+        "event details are current or verified. Do not invent event names, dates, deadlines, "
+        "eligibility, costs, or URLs. If you are not confident a particular event and its "
+        "details are real, say you cannot verify current listings and give useful search "
+        "terms or official event platforms to check instead. If the user provides event "
+        "links or details, help compare them against the user's preferences and clearly "
+        "identify anything that still needs checking. Be concise and explain why suggestions fit.\n\n"
         f"User request: {user_prompt}"
     )
     url = f"{GEMINI_API_BASE_URL}/{model}:generateContent"
@@ -54,10 +56,7 @@ def query_gemini_ai(user_prompt: str) -> dict:
         response = requests.post(
             url,
             params={"key": api_key},
-            json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "tools": [{"google_search": {}}],
-            },
+            json={"contents": [{"parts": [{"text": prompt}]}]},
             timeout=60,
         )
         if not response.ok:
@@ -66,9 +65,8 @@ def query_gemini_ai(user_prompt: str) -> dict:
             return {
                 "error": True,
                 "message": (
-                    f"Gemini request failed (HTTP {response.status_code}). Check that "
-                    "the model ID is available to your key and that Google Search grounding "
-                    "is supported for it."
+                    f"Gemini request failed (HTTP {response.status_code}). Check your model ID, "
+                    "API key, and AI Studio quota."
                 ),
             }
         data = response.json()
@@ -90,8 +88,7 @@ def query_gemini_ai(user_prompt: str) -> dict:
             "message": "Gemini did not return a recommendation. Try rephrasing your request.",
         }
 
-    candidate = candidates[0]
-    parts = candidate.get("content", {}).get("parts", [])
+    parts = candidates[0].get("content", {}).get("parts", [])
     answer = "\n".join(part["text"] for part in parts if part.get("text"))
     if not answer.strip():
         return {
@@ -99,12 +96,4 @@ def query_gemini_ai(user_prompt: str) -> dict:
             "message": "Gemini returned no text recommendation. Please try again.",
         }
 
-    sources = []
-    metadata = candidate.get("groundingMetadata", {})
-    for chunk in metadata.get("groundingChunks", []):
-        web = chunk.get("web", {})
-        source_url = web.get("uri")
-        if source_url and not any(item["url"] == source_url for item in sources):
-            sources.append({"title": web.get("title") or source_url, "url": source_url})
-
-    return {"error": False, "answer": answer, "sources": sources}
+    return {"error": False, "answer": answer, "sources": []}
