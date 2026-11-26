@@ -1,6 +1,6 @@
 # Hackathon Finder AI
 
-A Streamlit prototype for finding hackathons from a local starter dataset, ranking matches locally or with Ollama, and optionally using Backboard.
+Streamlit app that performs live web search for hackathons, asks a locally hosted Ollama model to assess result relevance and date evidence, and provides an age-rule evidence/review section for every result.
 
 ## Run locally
 
@@ -8,33 +8,33 @@ A Streamlit prototype for finding hackathons from a local starter dataset, ranki
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
+ollama pull qwen2.5:7b
+ollama serve
+```
+
+In another terminal, run:
+
+```bash
 streamlit run app.py
 ```
 
 Windows PowerShell activation: `.venv\\Scripts\\Activate.ps1`.
 
-## Ollama (optional)
+Set `OLLAMA_MODEL` and `OLLAMA_BASE_URL` in the environment if needed. Ollama and Qwen weights are free to run locally (hardware/internet are still required). The `ddgs` open-source client performs public DuckDuckGo web searches without an API key; availability/rate limits depend on the upstream service and can change. GitHub API keys are not used for web search.
 
-```bash
-ollama pull qwen2.5:7b
-ollama serve
-```
+## Search and AI behavior
 
-Select **Ollama (local)** in the app. **Local (free/offline)** mode requires no model download or API key. Backboard is optional and may incur provider charges.
+- Enter interests, a requested date range, and extra details.
+- The app searches live web results and shows their source URLs and snippets.
+- Qwen/Ollama annotates the results using only the supplied search data. The app preserves URLs and never treats model output as verified facts.
+- Search results are not guaranteed to be official, current, or complete. No numeric match score is shown.
+- If Ollama is unavailable, live results still appear without AI annotations.
 
-## Age-rule review workflow
+## Age-rule review
 
-1. Select an event with an official HTTPS URL and expand **Check age rule on the official page**.
-2. Choose **Fetch age-rule evidence**. The app extracts text around age-related terms from the page.
-3. Read the official page yourself; the extracted text is only a clue and may be incomplete, stale, or out of context.
-4. Enter the age bounds stated by the official rules (or confirm that the official page explicitly says there is no age limit), then save your review.
-5. The app compares your age with the rule you recorded.
+Every result includes an **Official page and age-rule review** section. The user can fetch possible age-related text from the source page, inspect it, and manually record age bounds after checking the official rules. Age comparison uses only the user's recorded rule. Unknown rules remain unknown; extracted text does not certify eligibility. Reviews are session-only.
 
-This is human-confirmed evidence gathering, not automatic certification. Unknown rules remain unknown; they are not treated as proof that an event accepts every age. Reviews last only for the current Streamlit browser session. The checker only fetches public HTTPS HTML, caps response size, rejects private network destinations and cross-host redirects, and does not send the user's age to the event website.
-
-## Dataset
-
-`data/hackathons.json` is a starter dataset. Verify each event, source link, deadline, and eligibility rule before relying on or sharing it. Numeric age bounds should only be added to the dataset after checking an official source; set `age_rule_status` to `verified` and include the source and date you checked.
+The page checker only fetches public HTTPS HTML, caps response size, rejects private network destinations and cross-host redirects, and does not send the user's age to the event website. Dynamic pages may not expose readable text; check those rules manually.
 
 ## Tests
 
@@ -44,4 +44,4 @@ python -m unittest discover -s tests -v
 
 ## Privacy and limitations
 
-The app does not persist entered age or review data. Page text can be dynamic or inaccessible to this lightweight HTML checker; in that case, open the official rules manually. This prototype does not guarantee current event details.
+The user's age is not included in search queries. Search terms and additional details are sent to the public search provider. Ollama receives the result titles/snippets and preferences locally. Verify age rules, date, cost, deadlines, and registration on the event's official page.

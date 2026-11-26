@@ -1,116 +1,115 @@
+import hashlib
+
 import streamlit as st
 
-from utils.ai_engine import recommend_hackathons
 from utils.eligibility import parse_age_bounds, verify_age_rule
+from utils.live_search import find_hackathons
 
 
 st.set_page_config(page_title="Hackathon Finder AI", page_icon="🔎", layout="wide")
+st.title("🔎 Live Hackathon Finder")
+st.write("Search the web for hackathons that fit your schedule and interests.")
+st.caption("Live search results and AI summaries can be incomplete. Confirm dates, eligibility, costs, and registration details on the event's official page.")
 
-st.title("🔎 Hackathon Finder AI")
-st.write("Discover hackathons that match your interests, experience, and age.")
-st.caption("Recommendations use a local starter dataset. Verify dates and eligibility on official event pages.")
-
-left, right = st.columns([1, 1])
-
+left, right = st.columns(2)
 with left:
-    age = st.number_input("Your age", min_value=13, max_value=99, value=16, step=1)
-    interests = st.text_area("Interests and preferred technologies", placeholder="AI, Python, climate, social good, web development", height=110)
-    experience = st.selectbox("Experience level", ["Beginner", "Intermediate", "Advanced"])
-
+    interests = st.text_input("Interests / technologies", placeholder="AI, Python, climate, social good")
+    details = st.text_area(
+        "What else are you looking for?",
+        placeholder="Beginner-friendly, virtual, free registration, team of 3, high-school eligible...",
+        height=120,
+    )
+    age = st.number_input("Your age (used only for your local comparison)", min_value=13, max_value=99, value=16, step=1)
 with right:
-    location = st.radio("Location", ["Online", "In-person", "No preference"], horizontal=True)
-    theme = st.text_input("Theme or cause", placeholder="Healthcare, education, climate")
-    team_size = st.selectbox("Team size", ["1", "2", "3", "4+"])
-    provider = st.selectbox("Recommendation engine", ["Local (free/offline)", "Ollama (local)", "Backboard"])
-
-provider_key = {"Local (free/offline)": "local", "Ollama (local)": "ollama", "Backboard": "backboard"}[provider]
+    st.markdown("#### When can you participate?")
+    start_date = st.date_input("Earliest event date", key="period_start")
+    end_date = st.date_input("Latest event date", key="period_end")
+    st.caption("The search query includes this period. Search results may not state event dates; verify them on each event page.")
 
 if age < 18:
-    st.warning("If you are under 18, some events may require parental consent or additional eligibility rules.")
+    st.warning("Some events require parental consent or have additional rules for minors.")
 
-preferences = (
-    f"Interests: {interests.strip()}\nExperience: {experience}\nLocation: {location}\n"
-    f"Theme: {theme.strip()}\nTeam size: {team_size}"
-)
-
-if st.button("Recommend hackathons", type="primary", use_container_width=True):
-    if not interests.strip() and not theme.strip():
-        st.warning("Add at least one interest or theme.")
+if st.button("Search live web", type="primary", use_container_width=True):
+    if not interests.strip() and not details.strip():
+        st.warning("Enter an interest or describe the hackathon you want.")
+    elif start_date > end_date:
+        st.error("The earliest date must be on or before the latest date.")
     else:
-        with st.spinner("Checking available data and ranking matches..."):
-            result = recommend_hackathons(preferences, int(age), provider_key)
-        if result.get("error"):
-            st.error(result.get("message", "Recommendation failed."))
-        elif isinstance(result.get("answer"), list):
-            matches = result["answer"]
-            if not matches:
-                st.info(result.get("message", "No matches were found."))
-            else:
-                st.subheader(f"{len(matches)} potential matches")
-                for index, event in enumerate(matches):
-                    st.markdown(f"### {event.get('name', 'Unknown event')}")
-                    left_card, right_card = st.columns([3, 1])
-                    with left_card:
-                        st.write(event.get("reason", "Potential match."))
-                        st.caption(f"{event.get('location', 'Location unknown')} • {event.get('dates', 'Dates unknown')} • {event.get('level', 'Level unknown')}")
-                        st.caption(f"Eligibility: {event.get('eligibility') or event.get('age_label') or 'Unknown—verify on the official page'}")
-                    with right_card:
-                        st.metric("Match score", f"{event.get('score', 0)}%")
-                        if event.get("url"):
-                            st.link_button("Official page", event["url"])
+        with st.spinner("Searching the web and asking your local Ollama model to assess results..."):
+            result = find_hackathons(interests, details, start_date, end_date)
+        st.session_state["live_search_result"] = result
 
-                    url = event.get("url", "")
-                    if url:
-                        event_key = f"age_verify_{index}_{event.get('name', 'event')}"
-                        with st.expander("Check age rule on the official page"):
-                            st.caption("The checker only extracts possible evidence. It cannot certify eligibility; review the linked official rules yourself.")
-                            if st.button("Fetch age-rule evidence", key=f"fetch_{event_key}"):
-                                with st.spinner("Fetching the event page..."):
-                                    st.session_state[f"evidence_{event_key}"] = verify_age_rule(url)
-                            evidence_result = st.session_state.get(f"evidence_{event_key}")
-                            if evidence_result:
-                                if evidence_result.get("error"):
-                                    st.warning(evidence_result["message"])
-                                else:
-                                    st.caption(f"Fetched {evidence_result['checked_at']} UTC from {evidence_result['url']}")
-                                    st.info(evidence_result["message"])
-                                    if evidence_result["evidence"]:
-                                        for sentence in evidence_result["evidence"]:
-                                            st.markdown(f"> {sentence}")
-                                    else:
-                                        st.warning("No evidence was extracted. Do not treat this as proof of unrestricted ages.")
-
-                                    st.markdown("**After checking the official rules yourself, record the rule below.**")
-                                    min_text = st.text_input("Minimum age (leave blank if none is stated)", key=f"min_{event_key}")
-                                    max_text = st.text_input("Maximum age (leave blank if none is stated)", key=f"max_{event_key}")
-                                    no_limit = st.checkbox("I confirmed the official rules explicitly allow all ages / state no age limit", key=f"none_{event_key}")
-                                    if st.button("Save my reviewed rule", key=f"save_{event_key}"):
-                                        try:
-                                            if not no_limit and not min_text.strip() and not max_text.strip():
-                                                raise ValueError("Enter at least one age bound, or confirm that the official rules explicitly state no age limit.")
-                                            minimum, maximum = parse_age_bounds(min_text, max_text)
-                                            st.session_state[f"verified_{event_key}"] = {
-                                                "minimum_age": minimum,
-                                                "maximum_age": maximum,
-                                                "no_limit": no_limit,
-                                                "source_url": url,
-                                                "checked_at": evidence_result["checked_at"],
-                                            }
-                                            st.success("Saved as reviewed for this browser session. This is your review, not an automatic certification.")
-                                        except ValueError as exc:
-                                            st.error(str(exc))
-
-                                    reviewed = st.session_state.get(f"verified_{event_key}")
-                                    if reviewed:
-                                        if reviewed["no_limit"]:
-                                            st.success("Reviewed rule: official page explicitly states no age limit.")
-                                        else:
-                                            st.success(f"Reviewed rule: ages {reviewed['minimum_age'] if reviewed['minimum_age'] is not None else 'unspecified minimum'}–{reviewed['maximum_age'] if reviewed['maximum_age'] is not None else 'unspecified maximum'}.")
-                                        in_range = (reviewed["minimum_age"] is None or int(age) >= reviewed["minimum_age"]) and (reviewed["maximum_age"] is None or int(age) <= reviewed["maximum_age"])
-                                        st.write("Your age matches the rule you recorded." if in_range else "Your age does not match the rule you recorded.")
-                                        st.caption("Session-only; re-check the official rules and update the dataset if you need this review to persist.")
-                    st.divider()
-        elif isinstance(result.get("answer"), str):
-            st.markdown(result["answer"])
+result = st.session_state.get("live_search_result")
+if result:
+    if result.get("error"):
+        st.error(result.get("message", "Search failed."))
+    elif not result.get("results"):
+        st.info(result.get("message", "No results found."))
+    else:
+        if result.get("ai_available"):
+            st.success("Live search completed; Ollama added a cautious relevance/date assessment.")
         else:
-            st.error("Unexpected recommendation response.")
+            st.warning("Live search completed, but Ollama was unavailable. Showing search results without AI assessment. Start Ollama and try again for local AI annotations.")
+        st.caption("No numeric match scores are generated. Search-result pages are candidates, not verified official sources.")
+
+        for item in result["results"]:
+            st.markdown(f"### {item['name']}")
+            st.write(item.get("reason", "Live search result; verify the page."))
+            st.caption(item.get("date_match", "Event dates not confirmed"))
+            st.write(item.get("snippet") or "No search snippet was supplied.")
+            if item.get("url"):
+                st.link_button("Open event/source page (confirm it is official)", item["url"])
+            else:
+                st.info("No event page URL was returned for this result.")
+
+            stable_key = hashlib.sha256(item.get("url", item["id"]).encode("utf-8")).hexdigest()[:12]
+            with st.expander("Official page and age-rule review"):
+                if item.get("url"):
+                    st.markdown(f"**Source URL:** {item['url']}")
+                    st.caption("Confirm that this is the official event or rules page before relying on its contents.")
+                    if st.button("Fetch possible age-rule evidence", key=f"fetch_age_{stable_key}"):
+                        with st.spinner("Fetching page text..."):
+                            st.session_state[f"age_evidence_{stable_key}"] = verify_age_rule(item["url"])
+                    evidence = st.session_state.get(f"age_evidence_{stable_key}")
+                    if evidence:
+                        if evidence.get("error"):
+                            st.warning(evidence["message"])
+                        else:
+                            st.caption(f"Fetched {evidence['checked_at']} UTC")
+                            st.info(evidence["message"])
+                            for sentence in evidence.get("evidence", []):
+                                st.markdown(f"> {sentence}")
+                            st.caption("Extracted text is only a clue. Read the official rules yourself; no evidence does not mean all ages are allowed.")
+                else:
+                    st.warning("No page URL is available, so age rules cannot be checked for this result.")
+
+                st.markdown("**After reading the official rules, record your own review (session only).**")
+                minimum_text = st.text_input("Minimum age, if stated", key=f"min_age_{stable_key}")
+                maximum_text = st.text_input("Maximum age, if stated", key=f"max_age_{stable_key}")
+                no_age_limit = st.checkbox("I verified the official rules explicitly state no age limit", key=f"no_age_limit_{stable_key}")
+                if st.button("Save reviewed age rule", key=f"save_age_{stable_key}"):
+                    try:
+                        if not no_age_limit and not minimum_text.strip() and not maximum_text.strip():
+                            raise ValueError("Enter an age bound or confirm an explicit no-age-limit rule.")
+                        minimum, maximum = parse_age_bounds(minimum_text, maximum_text)
+                        st.session_state[f"reviewed_age_{stable_key}"] = {
+                            "minimum": minimum,
+                            "maximum": maximum,
+                            "no_limit": no_age_limit,
+                            "url": item.get("url", ""),
+                        }
+                    except ValueError as exc:
+                        st.error(str(exc))
+
+                reviewed = st.session_state.get(f"reviewed_age_{stable_key}")
+                if reviewed:
+                    if reviewed["no_limit"]:
+                        st.success("Your review: the official rules explicitly state no age limit.")
+                    else:
+                        min_label = reviewed["minimum"] if reviewed["minimum"] is not None else "not stated"
+                        max_label = reviewed["maximum"] if reviewed["maximum"] is not None else "not stated"
+                        st.success(f"Your reviewed rule: minimum {min_label}; maximum {max_label}.")
+                        matches_age = (reviewed["minimum"] is None or int(age) >= reviewed["minimum"]) and (reviewed["maximum"] is None or int(age) <= reviewed["maximum"])
+                        st.write("Your age matches the rule you recorded." if matches_age else "Your age does not match the rule you recorded.")
+                    st.caption("Human-reviewed, session-only; this is not automatic eligibility certification.")
+            st.divider()
