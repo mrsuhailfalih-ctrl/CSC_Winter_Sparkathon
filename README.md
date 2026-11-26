@@ -1,8 +1,8 @@
 # Hackathon Finder AI
 
-A no-paid-LLM Streamlit app for discovering hackathons through public web search. Results are deduplicated and ranked using a built-in local keyword/date ranker. Optional Ollama summaries run only when explicitly enabled and a model is available.
+Streamlit app for discovering hackathons through public web search. It filters editorial/guide pages and clear stale editions, normalizes tracking links, merges likely duplicates, and ranks using free local keyword and date rules. Optional Ollama summaries require a model installed on the machine running the app; the app works without it.
 
-## Run the website locally
+## Run locally
 
 ```bash
 python -m venv .venv
@@ -13,26 +13,24 @@ streamlit run app.py
 
 Windows PowerShell activation: `.venv\\Scripts\\Activate.ps1`.
 
-The app's search and ranking work without Ollama or a model download. The free DuckDuckGo search client can be rate-limited or unavailable because it relies on a public upstream service; it is not a guaranteed production search API. Existing hardware and internet access are assumed.
+## About a free built-in AI model
 
-## Optional Ollama summaries
-
-To enable local model summaries, install Ollama, then run:
+There is no reliable way to provide public, hosted LLM inference at $0 with no installation or server: model weights may be open-source, but serving them requires compute. This app therefore does not pretend a remote AI model is free. The default built-in search ranker runs locally as ordinary Python code without Ollama or model downloads. Optionally, run Ollama locally for AI-written relevance notes:
 
 ```bash
 ollama pull qwen2.5:7b
 ollama serve
 ```
 
-Enable **Use optional local Ollama AI summaries** in the app. If Ollama is stopped or the model is missing, the app explains the issue and continues with the local ranker. No request is made to Ollama unless the checkbox is enabled.
+Enable **Use optional local Ollama AI summaries**. If Ollama is not installed, running, or has no model, the app continues with local filtering and ranking.
 
-## Public deployment and cost
+## Search quality and limitations
 
-A public website can be hosted on a free app tier if available, but free tiers, sleep limits, and quotas change. The deployed app's built-in local ranker needs no model server. Ollama running on a developer's laptop is not reachable by public visitors; public Ollama inference requires a model server and compute, which cannot be guaranteed to be both free and reliably available. Do not expose Ollama's unauthenticated API publicly.
+Search queries explicitly target registration pages and exclude common guide/FAQ/recap terms. Results from guide/blog/archive paths and obvious retrospective or out-of-period editions are filtered. Tracking links are normalized and likely duplicate event titles are merged. Explicit dates are compared with the requested window; undated results are labeled unconfirmed. Search snippets can still be stale or wrong, so check the event's official page.
 
-## Search and eligibility
+## Age-rule review
 
-The app removes obvious editorial pages, normalizes tracking links, merges likely duplicates, and prioritizes explicit date evidence and matching terms. Search snippets may be wrong or stale. Every result includes an official-page and age-rule evidence/review section. Extracted rules are clues only; a person must read the organizer's official rules and manually confirm eligibility.
+Every result offers the official page and age-rule evidence/review workflow. Extracted text is only a clue. Read the organizer's current rules and manually confirm eligibility; the app does not certify it.
 
 ## Tests
 
