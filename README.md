@@ -1,29 +1,31 @@
 # AI Hackathon Finder
 
-A Streamlit app for the CSC Winter Sparkathon that helps students:
-
-- discover beginner-friendly hackathons
-- match with teammates based on complementary skills
-- get AI-assisted search and project ideas
-- use local sample data when the AI API is unavailable
+A Streamlit app for discovering hackathons. Its main workflow uses Backboard AI to search for events based on your prompt and preferences; a small clearly labeled sample dataset is available for offline browsing. The app does not match teammates.
 
 ## Run locally
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+source .venv/bin/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Backboard AI configuration
+## Configure Backboard AI
 
-Create a local `.env` file:
+Create a local `.env` file in the project root (do not commit it):
 
 ```text
 BACKBOARD_API_KEY=your_key_here
+# Optional, if your Backboard account uses a different endpoint:
+BACKBOARD_API_URL=https://your-backboard-endpoint
 ```
 
-For Streamlit Community Cloud, add `BACKBOARD_API_KEY` under **App settings → Secrets** instead of committing a key.
+On Streamlit Community Cloud, add the same values under **App settings → Secrets**:
 
-The Backboard endpoint in `utils/ai_engine.py` may need adjustment to match the API details supplied for the hackathon.
+```toml
+BACKBOARD_API_KEY = "your_key_here"
+# BACKBOARD_API_URL = "https://your-backboard-endpoint"
+```
+
+The API endpoint and request fields are configurable/in `utils/ai_engine.py`; confirm them against the endpoint and API schema provided by Backboard. When AI is not configured or unavailable, the app still lets you search and filter the sample dataset. Sample listings are illustrative, not verified current events.

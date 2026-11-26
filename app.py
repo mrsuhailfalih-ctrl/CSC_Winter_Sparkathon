@@ -1,111 +1,113 @@
 import json
 from pathlib import Path
 
-import pandas as pd
 import streamlit as st
 
 from utils.ai_engine import query_backboard_ai
-from utils.matcher import find_teammates
 
-st.set_page_config(
-    page_title="AI Hackathon Finder",
-    page_icon="⚡",
-    layout="wide",
-)
-
+st.set_page_config(page_title="Hackathon Finder AI", page_icon="🔎", layout="wide")
 DATA_DIR = Path(__file__).parent / "data"
 
 
 @st.cache_data
-def load_json(filename):
-    with open(DATA_DIR / filename, "r", encoding="utf-8") as file:
+def load_hackathons():
+    with open(DATA_DIR / "hackathons.json", encoding="utf-8") as file:
         return json.load(file)
 
 
-st.title(" AI Hackathon Finder & Teammate Matcher")
+def display_ai_result(result):
+    """Show a readable text field when available, otherwise show the response."""
+    if isinstance(result, str):
+        st.markdown(result)
+        return
+    if isinstance(result, dict):
+        for key in ("response", "answer", "content", "message", "text"):
+            value = result.get(key)
+            if isinstance(value, str) and value.strip():
+                st.markdown(value)
+                other_fields = {
+                    name: item for name, item in result.items()
+                    if name not in {key, "error"}
+                }
+                if other_fields:
+                    with st.expander("Additional response details"):
+                        st.json(other_fields)
+                return
+    st.json(result)
+
+
+st.title("🔎 Find Your Next Hackathon")
 st.markdown(
-    "Find beginner-friendly hackathons, build a balanced team, "
-    "and generate a practical project idea."
+    "Describe the event you want. AI can look for current opportunities and "
+    "summarize the dates, eligibility, cost, format, and official links. "
+    "Always verify deadlines and details on the organizer’s website."
 )
 
-hackathons = load_json("hackathons.json")
-teammates = load_json("teammates.json")
+with st.sidebar:
+    st.header("Your preferences")
+    location = st.text_input("Location", placeholder="Online, Seattle, or anywhere")
+    experience = st.selectbox(
+        "Experience level", ["Any", "First-time", "Beginner", "Intermediate", "Advanced"]
+    )
+    interests = st.text_input("Topics or skills", placeholder="AI, climate, Python...")
+    format_preference = st.selectbox("Format", ["Any", "Virtual", "In-person"])
+    st.caption("AI search requires a configured Backboard API key.")
 
-st.sidebar.header("Your Hacker Profile")
-name = st.sidebar.text_input("First Name", "Alex")
-experience = st.sidebar.selectbox(
-    "Experience Level",
-    ["First-Timer", "Beginner", "Intermediate"],
-)
-skills = st.sidebar.multiselect(
-    "Your Skills",
-    ["Python", "React", "HTML/CSS", "Figma", "Machine Learning", "Pitching"],
-    default=["Python", "HTML/CSS"],
-)
-looking_for = st.sidebar.radio("Looking For", ["Teammates", "Mentor", "Both"])
-
-user_profile = {
-    "name": name,
-    "experience": experience,
-    "skills": skills,
-    "lookingFor": looking_for,
-}
-
-st.sidebar.divider()
-st.sidebar.caption("MVP for CSC Winter Sparkathon")
-
-st.subheader("🤖 AI Vibe & Skill Matcher")
-user_query = st.text_area(
-    "Describe what you're looking for:",
-    "Find a chill online weekend hackathon for beginners where I can learn Python.",
+st.subheader("🤖 Search with AI")
+query = st.text_area(
+    "What kind of hackathon are you looking for?",
+    placeholder="For example: a beginner-friendly online AI hackathon with registration still open.",
+    height=100,
 )
 
-if st.button("Find My Match", type="primary", use_container_width=True):
-    if not user_query.strip():
-        st.warning("Describe what kind of hackathon or team you want first.")
+if st.button("Find hackathons", type="primary", width="stretch"):
+    if not query.strip():
+        st.warning("Enter a description of the hackathon you want to find.")
     else:
-        with st.spinner("Searching and matching..."):
-            ai_result = query_backboard_ai(user_query, user_profile)
-
-        if ai_result.get("error"):
-            st.info(ai_result["message"])
+        preferences = {
+            "location": location,
+            "experience": experience,
+            "interests": interests,
+            "format": format_preference,
+        }
+        with st.spinner("Searching for relevant hackathons..."):
+            result = query_backboard_ai(query, preferences)
+        if isinstance(result, dict) and result.get("error"):
+            st.warning(result["message"])
+            st.info("Use the sample listings below while AI search is unavailable.")
         else:
-            st.success("AI match generated")
-            st.write(ai_result)
+            st.success("Search complete")
+            display_ai_result(result)
 
 st.divider()
-st.subheader("📅 Featured Student Hackathons")
+st.subheader("📅 Browse sample listings")
+st.caption(
+    "These are illustrative seed records, not verified live events. "
+    "Use AI search and confirm event details with organizers."
+)
 
+hackathons = load_hackathons()
 col1, col2, col3 = st.columns(3)
 with col1:
-    format_filter = st.selectbox("Format", ["All", "Virtual", "In-Person"])
+    format_filter = st.selectbox("Filter by format", ["All", "Virtual", "In-Person"])
 with col2:
-    level_filter = st.selectbox("Difficulty", ["All", "Beginner", "All Levels"])
+    level_filter = st.selectbox("Filter by experience", ["All", "Beginner", "All Levels"])
 with col3:
-    search = st.text_input("Search")
+    search = st.text_input("Filter sample listings", placeholder="Search name or topic")
 
-filtered = pd.DataFrame(hackathons)
+filtered = hackathons
 if format_filter != "All":
-    filtered = filtered[filtered["format"] == format_filter]
+    filtered = [event for event in filtered if event.get("format") == format_filter]
 if level_filter != "All":
-    filtered = filtered[filtered["level"] == level_filter]
-if search:
-    haystack = filtered[["name", "theme", "tags"]].astype(str).agg(" ".join, axis=1)
-    filtered = filtered[haystack.str.contains(search, case=False, na=False)]
+    filtered = [event for event in filtered if event.get("level") == level_filter]
+if search.strip():
+    term = search.strip().casefold()
+    filtered = [
+        event for event in filtered
+        if term in " ".join(str(value) for value in event.values()).casefold()
+    ]
 
-st.dataframe(filtered, use_container_width=True, hide_index=True)
-
-st.divider()
-st.subheader("🤝 Suggested Teammates")
-matches = find_teammates(skills, teammates)
-
-if not matches:
-    st.info("Add a few skills to see teammate matches.")
+if filtered:
+    st.dataframe(filtered, width="stretch", hide_index=True)
 else:
-    for match in matches:
-        with st.container(border=True):
-            st.markdown(f"**{match['name']}** — {match['role']}")
-            st.write(
-                f"Skills: {', '.join(match['skills'])}\n\n"
-                f"Why they fit: {match['match_reason']}"
-            )
+    st.info("No sample listings match those filters.")
