@@ -1,6 +1,28 @@
 # Hackathon Finder AI
 
-## Run
+A browser-based hackathon finder built with Streamlit. Once the app is deployed, visitors open its link and search immediately—no Python, Ollama, API key, or separate downloads are required on their devices.
+
+## Open the app
+
+Use the public app URL provided by the person who deployed it. Enter interests and a date range, then select **Search for hackathons**. OpenRouter AI ranking is optional and disabled by default; the finder works without an AI key or a locally installed model.
+
+> Search listings are candidates, not guarantees. Check dates, eligibility, and registration on the organizer's official page. Public search providers may be incomplete or temporarily unavailable.
+
+## Deploy once for browser access
+
+Deployment is a one-time setup by the app owner; visitors do not repeat it or install dependencies. For a 14-year-old project owner, ask a parent/guardian to review the hosting provider's current age and account terms and manage deployment if required.
+
+1. Push this repository to GitHub.
+2. The account owner opens [Streamlit Community Cloud](https://share.streamlit.io/) and connects the repository, following the host's current account requirements.
+3. Create an app using this repository's `main` branch and `app.py` as the entry point.
+4. Deploy. The host installs the Python packages listed in `requirements.txt` automatically.
+5. Share the resulting app URL. Later commits to the configured branch are deployed by the host automatically.
+
+No secrets are needed for the default search and local ranking. Do not configure an AI API key unless the account owner has checked the provider's age, billing, and usage terms. Never commit secrets to the repository. Ollama is not part of the hosted workflow and visitors do not need to install it.
+
+## Run locally (for development only)
+
+You only need to install these tools on the computer used for development—not on every visitor's device:
 
 ```bash
 python -m venv .venv
@@ -13,23 +35,11 @@ Windows PowerShell activation: `.venv\\Scripts\\Activate.ps1`.
 
 ## Optional OpenRouter AI ranking
 
-The app can use OpenRouter's `google/gemma-4-26b-a4b-it:free` model to score and explain search candidates. Search and deterministic local ranking continue to work if AI is disabled, the API key is missing, the model is unavailable, or a free-tier limit is reached.
-
-1. Create an OpenRouter API key under an account that is eligible under OpenRouter's current terms. A parent or guardian should review account eligibility and supervise use for anyone under 18.
-2. In local development, create `.streamlit/secrets.toml` (this file must not be committed) with:
-
-```toml
-OPENROUTER_API_KEY = "your-key-here"
-```
-
-   Or set `OPENROUTER_API_KEY` in the server environment. Streamlit Community Cloud: add the same key in the app's **Settings → Secrets**.
-3. Run the app and leave **Use OpenRouter AI relevance ranking** enabled.
-
-The key is only read by the Python server and is sent to OpenRouter's API; it is never included in the page or result data. Optional `OPENROUTER_MODEL` overrides the model ID. Free access and rate limits may change. The app sends only event search titles/snippets and requested dates, limits output size, and validates returned candidate IDs before using explanations/scores.
+AI ranking is optional. If enabled, the server needs an OpenRouter API key supplied through its secret manager or environment; visitors should never provide or see that key. Only configure this after an adult account owner reviews the provider's current terms, age requirements, free-tier limits, and possible charges. With AI disabled or unavailable, search and local ranking continue to work.
 
 ## Search and eligibility
 
-Search uses public web results, targets individual event pages, and filters obvious directories, guides, and stale editions. Search can be rate-limited or inaccurate; confirm dates, registration, and eligibility on the organizer's official page. Age-rule extraction is only a clue, not an eligibility decision.
+The app discovers candidates through public web search and applies local filters. Search may be rate-limited, outdated, or incomplete. It does not certify event dates or age eligibility. Open each organizer's official page and verify the rules yourself.
 
 ## Tests
 
