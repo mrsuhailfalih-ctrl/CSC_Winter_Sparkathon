@@ -32,11 +32,13 @@ class ResultFilteringTests(unittest.TestCase):
         self.assertEqual(diagnostics["not_individual_event"], 3)
 
     def test_accepts_specific_event_url_when_title_omits_hackathon(self):
-        candidate = {
-            "name": "Global AI Build Challenge",
-            "url": "https://example.org/events/global-ai-build",
-            "snippet": "Join our hackathon for AI developers. Applications open.",
-        }
+        candidate = {"name": "Global AI Build Challenge", "url": "https://example.org/events/global-ai-build", "snippet": "Join our hackathon for AI developers. Applications open."}
+        _, possible, diagnostics = filter_event_candidates([candidate], "AI", date(2027, 3, 1), date(2027, 3, 31))
+        self.assertEqual(possible, [candidate])
+        self.assertEqual(diagnostics["not_individual_event"], 0)
+
+    def test_does_not_reject_specific_hackathon_for_good_title(self):
+        candidate = {"name": "AI Hackathon for Good", "url": "https://example.org/events/ai-for-good", "snippet": "Apply now for the event."}
         _, possible, diagnostics = filter_event_candidates([candidate], "AI", date(2027, 3, 1), date(2027, 3, 31))
         self.assertEqual(possible, [candidate])
         self.assertEqual(diagnostics["not_individual_event"], 0)

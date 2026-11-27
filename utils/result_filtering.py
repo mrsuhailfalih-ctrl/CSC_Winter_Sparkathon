@@ -21,12 +21,13 @@ DATE_RE = re.compile(
 ISO_DATE_RE = re.compile(r"\b(20\d{2})-(0?[1-9]|1[0-2])-(0?[1-9]|[12]\d|3[01])\b")
 YEAR_MONTH_RE = re.compile(rf"\b({MONTH_PATTERN})\.?\s+(20\d{{2}})\b", re.I)
 GENERIC_TITLES = re.compile(
-    r"\b(directory|find upcoming|upcoming hackathons?|hackathons? for|online hackathons?|"
-    r"hackathons? and challenges|browse events|boot\s?camp|pre-?register|registration page|"
-    r"competitions, quizzes, hackathons)\b", re.I
+    r"\b(directory|find upcoming|upcoming hackathons?|browse events|boot\s?camp|"
+    r"pre-?register|registration page|hackathons? and challenges|competitions, quizzes, hackathons)\b",
+    re.I,
 )
 GENERIC_SLUGS = {"", "hackathons", "events", "search", "browse", "upcoming", "all", "competitions"}
 KNOWN_DIRECTORY_HOSTS = {"dev.events", "hack4hack.com", "aiwhatson.com", "mlh.io"}
+EVENT_ACTIONS = re.compile(r"\b(register|registration|apply|applications?|prizes?|teams?|submit|challenge)\b", re.I)
 
 
 def extract_event_dates(text: str) -> list[date]:
@@ -66,7 +67,6 @@ def _is_individual_hackathon(item: dict[str, Any]) -> bool:
     title = str(item.get("name", "")).strip()
     snippet = str(item.get("snippet", ""))
     title_lower = title.lower()
-    text = f"{title} {snippet}"
     if GENERIC_TITLES.search(title):
         return False
 
@@ -77,18 +77,22 @@ def _is_individual_hackathon(item: dict[str, Any]) -> bool:
     except ValueError:
         host, path_parts = "", []
     slug = path_parts[-1] if path_parts else ""
-    # Known discovery sites and root/category URLs are never event pages.
+
+    # Reject known search directories at their root/category routes, but don't
+    # classify an individual event as generic just because its title says
+    # "hackathon for ..." or the provider omitted that word from its title.
     if host in KNOWN_DIRECTORY_HOSTS and (not path_parts or slug in GENERIC_SLUGS):
         return False
     if slug in GENERIC_SLUGS and not re.search(r"\bhackathon\b", title_lower):
         return False
 
-    # Search providers vary whether the term appears in title or snippet. Accept
-    # a specific event title OR a page-specific route with event evidence in snippet.
     has_event_title = bool(re.search(r"\bhack(?:-a-)?thon\b", title_lower))
-    has_event_evidence = bool(re.search(r"\bhack(?:-a-)?thon\b", text, re.I))
+    has_event_evidence = bool(re.search(r"\bhack(?:-a-)?thon\b", snippet, re.I) or EVENT_ACTIONS.search(snippet))
     has_specific_route = bool(path_parts and slug not in GENERIC_SLUGS)
-    return has_event_evidence and (has_event_title or has_specific_route)
+    # The upstream search cleaner has already checked that results are event-like.
+    # Here we only discard obvious directory/course pages and allow specific
+    # event routes whose search title omitted the word "hackathon".
+    return has_event_title or (has_specific_route and has_event_evidence)
 
 
 def _topic_match(item: dict[str, Any], interests: str) -> bool:
