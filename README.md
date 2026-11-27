@@ -1,25 +1,33 @@
 # Hackathon Finder
 
-The app checks public event-hosting platform pages for structured event listings. It no longer uses DuckDuckGo, another general search engine, or general web-result snippets.
+The app checks public event-hosting platform pages for structured event listings. It does not use DuckDuckGo, general-web result snippets, or AI-generated event discovery.
 
-## What the app does
+## Optional Momen AI ranking
 
-1. Enter interests/preferences and a date range.
-2. The server checks the public browse pages of Devpost, Devfolio, MLH, Unstop, Eventbrite, and Luma.
-3. Where the platform page exposes event links and Schema.org `Event` JSON-LD, the app reads a small number of individual event pages and extracts title, dates, description, and location.
-4. It displays only links on the corresponding official platform domains, and filters known dates outside the selected period. Events with no structured date are labeled unverified.
+Momen AI can rank candidate events after discovery. It does not find events or verify dates, eligibility, or registration details. The integration uses Momen's project GraphQL endpoint and your project's generated AI-agent mutation; exact field names and input variables depend on the AI agent configured in your Momen project.
 
-Coverage is best-effort, not comprehensive. Some platforms render listings in JavaScript, have no public unauthenticated API, or may limit automated access. If a source returns no data, the app reports that in diagnostics rather than quietly falling back to DuckDuckGo or inventing events. Check each event's organizer page for the current schedule, registration, and eligibility. Automated access should comply with the platforms' terms and robots rules.
+1. In Momen, create/configure an AI agent and inspect its invocation mutation in the project's GraphiQL/schema tools.
+2. Provide the GraphQL endpoint, the generated mutation operation, and its variables shape to the server configuration. The variables JSON may include the literal `{{PROMPT}}` wherever the prompt string should go. For example, a mutation declaring `$prompt: String!` uses `{"prompt":"{{PROMPT}}"}`; if your generated mutation expects an input object, configure a matching object shape instead.
+3. Set these **server-side secrets only** in the hosting provider (for Streamlit, app Settings → Secrets):
 
-## Deploy once for browser access
+```toml
+MOMEN_GRAPHQL_URL = "https://villa.momen.app/zero/YOUR_PROJECT_ID/api/graphql-v2"
+MOMEN_JWT = "YOUR_SERVER_SIDE_JWT"
+MOMEN_AI_MUTATION = '''mutation Rank($prompt: String!) { yourGeneratedAgentOperation(prompt: $prompt) }'''
+MOMEN_AI_VARIABLES_JSON = '{"prompt":"{{PROMPT}}"}'
+```
 
-Visitors need only the deployed app URL. They do not install Python, Ollama, or search-provider credentials. A minor project owner should have a parent/guardian review the hosting provider's current account requirements and manage deployment if necessary.
+The mutation and variables above are examples only—replace them with the exact operation and types from your Momen project. Keep credentials out of Git and browser code. Use a least-privilege token with appropriate expiry/rotation, and have an adult account owner review Momen's current age, privacy, quota, and billing rules before enabling it. Momen receives candidate titles, links, descriptions, dates, and locations for ranking. The integration rejects rankings for URLs not present in the candidate list and falls back without AI if configuration or requests fail.
 
-1. Push the repository to GitHub.
-2. Connect it to a compatible Streamlit host, set `app.py` as the entry point, and deploy.
-3. Share the resulting app URL. The host installs dependencies from `requirements.txt`.
+The app is still hosted as Streamlit in this repository. Moving the entire UI/runtime to Momen would require creating/configuring a Momen project and rebuilding the interface there; it cannot be completed just by adding a Python API call.
 
-## Run locally for development
+## Event discovery
+
+The app checks Devpost, Devfolio, MLH, Unstop, Eventbrite, and Luma public pages for structured event data. Some platforms render listings dynamically or limit automated access, so coverage is best-effort. No results does not mean no events exist. Verify each event on its official organizer page.
+
+## Deploy and develop
+
+Visitors need only the deployed app URL. Deployment should be managed by an account owner who meets the host's current requirements. For local development:
 
 ```bash
 python -m venv .venv
@@ -28,10 +36,4 @@ python -m pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Windows PowerShell activation: `.venv\\Scripts\\Activate.ps1`.
-
-## Tests
-
-```bash
-python -m unittest discover -s tests -v
-```
+Tests: `python -m unittest discover -s tests -v`
