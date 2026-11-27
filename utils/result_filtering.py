@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from datetime import date
 from typing import Any
+from urllib.parse import urlsplit
 
 MONTHS = {
     "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3,
@@ -19,6 +20,13 @@ DATE_RE = re.compile(
 )
 ISO_DATE_RE = re.compile(r"\b(20\d{2})-(0?[1-9]|1[0-2])-(0?[1-9]|[12]\d|3[01])\b")
 YEAR_MONTH_RE = re.compile(rf"\b({MONTH_PATTERN})\.?\s+(20\d{{2}})\b", re.I)
+GENERIC_TITLES = re.compile(
+    r"\b(directory|find upcoming|upcoming hackathons?|hackathons? for|online hackathons?|"
+    r"hackathons? and challenges|browse events|boot\s?camp|pre-?register|registration page|"
+    r"competitions, quizzes, hackathons)\b", re.I
+)
+GENERIC_SLUGS = {"", "hackathons", "events", "search", "browse", "upcoming", "all", "competitions"}
+KNOWN_DIRECTORY_HOSTS = {"dev.events", "hack4hack.com", "aiwhatson.com", "mlh.io"}
 
 
 def extract_event_dates(text: str) -> list[date]:
@@ -41,8 +49,6 @@ def extract_event_dates(text: str) -> list[date]:
             covered_spans.append(match.span())
         except ValueError:
             continue
-    # Month/year evidence is useful as a month-level date, but not when part of an
-    # explicit day-level date already parsed above.
     for match in YEAR_MONTH_RE.finditer(text):
         if any(start <= match.start() < end for start, end in covered_spans):
             continue
@@ -57,11 +63,32 @@ def _topic_words(text: str) -> set[str]:
 
 
 def _is_individual_hackathon(item: dict[str, Any]) -> bool:
-    title = str(item.get("name", "")).lower()
-    if re.search(r"\b(boot\s?camp|directory|find upcoming|pre-register|pre register|registration page|hackathons? for|online hackathons?)\b", title):
+    title = str(item.get("name", "")).strip()
+    snippet = str(item.get("snippet", ""))
+    title_lower = title.lower()
+    text = f"{title} {snippet}"
+    if GENERIC_TITLES.search(title):
         return False
-    # Directories and course/signup pages often mention hackathons in snippets.
-    return bool(re.search(r"\bhack(?:-a-)?thon\b", title))
+
+    try:
+        parsed = urlsplit(str(item.get("url", "")))
+        host = (parsed.hostname or "").lower().removeprefix("www.")
+        path_parts = [part for part in parsed.path.lower().split("/") if part]
+    except ValueError:
+        host, path_parts = "", []
+    slug = path_parts[-1] if path_parts else ""
+    # Known discovery sites and root/category URLs are never event pages.
+    if host in KNOWN_DIRECTORY_HOSTS and (not path_parts or slug in GENERIC_SLUGS):
+        return False
+    if slug in GENERIC_SLUGS and not re.search(r"\bhackathon\b", title_lower):
+        return False
+
+    # Search providers vary whether the term appears in title or snippet. Accept
+    # a specific event title OR a page-specific route with event evidence in snippet.
+    has_event_title = bool(re.search(r"\bhack(?:-a-)?thon\b", title_lower))
+    has_event_evidence = bool(re.search(r"\bhack(?:-a-)?thon\b", text, re.I))
+    has_specific_route = bool(path_parts and slug not in GENERIC_SLUGS)
+    return has_event_evidence and (has_event_title or has_specific_route)
 
 
 def _topic_match(item: dict[str, Any], interests: str) -> bool:
@@ -72,20 +99,25 @@ def _topic_match(item: dict[str, Any], interests: str) -> bool:
     available = _topic_words(evidence)
     if "ai" in requested and ("artificial" in available or "intelligence" in available):
         available.add("ai")
-    # Comma-separated interests are alternatives: AI OR Python.
     return bool(requested & available)
 
 
 def filter_event_candidates(
     candidates: list[dict[str, Any]], interests: str, start: date, end: date,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, int]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     """Return dated-in-range and date-unknown individual events; exclude known stale dates."""
     confirmed: list[dict[str, Any]] = []
     possible: list[dict[str, Any]] = []
-    diagnostics = {"input": len(candidates), "not_individual_event": 0, "topic_mismatch": 0, "outside_date_range": 0}
+    rejected_titles: list[str] = []
+    diagnostics: dict[str, Any] = {
+        "input": len(candidates), "not_individual_event": 0,
+        "topic_mismatch": 0, "outside_date_range": 0, "rejected_title_samples": rejected_titles,
+    }
     for item in candidates:
         if not _is_individual_hackathon(item):
             diagnostics["not_individual_event"] += 1
+            if len(rejected_titles) < 10:
+                rejected_titles.append(str(item.get("name", "(untitled)"))[:160])
             continue
         if not _topic_match(item, interests):
             diagnostics["topic_mismatch"] += 1
@@ -100,7 +132,6 @@ def filter_event_candidates(
         elif dates or item.get("date_fit") is False:
             diagnostics["outside_date_range"] += 1
         elif item.get("date_fit") is True:
-            # Keep source-confirmed dates if a nonstandard format was not parsed here.
             confirmed.append(item)
         else:
             item["date_fit"] = None
