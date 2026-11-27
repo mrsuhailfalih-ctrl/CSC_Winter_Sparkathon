@@ -8,37 +8,41 @@ from utils.live_search import find_hackathons
 from utils.openrouter_ai import analyze_with_openrouter
 
 
-def _preference_tokens(text: str) -> set[str]:
+def _words(text: str) -> set[str]:
     ignored = {"and", "the", "for", "with", "from", "that", "this", "any", "are", "you", "your", "want", "looking", "hackathon", "hackathons", "event", "events"}
     return {word for word in re.findall(r"[a-z0-9]+", text.lower()) if (len(word) >= 3 or word == "ai") and word not in ignored}
 
 
-def _matches_search_preferences(item: dict, interests: str, details: str) -> bool:
-    """Be conservative: require date evidence and every requested topic/constraint."""
-    # Unknown dates are not evidence that an event is happening in the requested period.
-    if item.get("date_fit") is not True:
-        return False
-
+def _has_topic_match(item: dict, interests: str) -> bool:
+    terms = _words(interests)
+    if not terms:
+        return True
     evidence = f"{item.get('name', '')} {item.get('snippet', '')}".lower()
-    evidence_terms = _preference_tokens(evidence)
-    interest_terms = _preference_tokens(interests)
-    if "ai" in interest_terms and ("artificial" in evidence_terms or "intelligence" in evidence_terms):
+    evidence_terms = _words(evidence)
+    if "ai" in terms and ("artificial" in evidence_terms or "intelligence" in evidence_terms):
         evidence_terms.add("ai")
-    if not interest_terms.issubset(evidence_terms):
-        return False
+    # Interests are alternatives (e.g. AI OR Python), not a requirement that every
+    # search result snippet repeat every entered keyword.
+    return bool(terms & evidence_terms)
 
-    detail_terms = _preference_tokens(details)
-    if detail_terms & {"online", "virtual", "remote"}:
-        if not re.search(r"\b(online|virtual|remote|remote-first|anywhere|worldwide)\b", evidence):
-            return False
-    if "free" in detail_terms:
-        if not re.search(r"\b(free|no cost|without charge|free to enter|free entry)\b", evidence):
-            return False
-    # Enforce any other specific words the user provided too.
-    remaining_details = detail_terms - {"online", "virtual", "remote", "free"}
-    if not remaining_details.issubset(evidence_terms):
-        return False
-    return True
+
+def _preference_status(item: dict, details: str) -> list[str]:
+    evidence = f"{item.get('name', '')} {item.get('snippet', '')}".lower()
+    requested = _words(details)
+    status = []
+    if requested & {"online", "virtual", "remote"}:
+        status.append("Online/virtual: mentioned" if re.search(r"\b(online|virtual|remote|remote-first|anywhere|worldwide)\b", evidence) else "Online/virtual: not confirmed")
+    if "free" in requested:
+        status.append("Free: mentioned" if re.search(r"\b(free|no cost|without charge|free to enter|free entry)\b", evidence) else "Free: not confirmed")
+    return status
+
+
+def _split_candidates(candidates: list[dict], interests: str) -> tuple[list[dict], list[dict]]:
+    relevant = [item for item in candidates if _has_topic_match(item, interests)]
+    # Never label unknown dates as in-range; keep them visible as unverified possibilities.
+    confirmed = [item for item in relevant if item.get("date_fit") is True]
+    possible = [item for item in relevant if item.get("date_fit") is None]
+    return confirmed, possible
 
 
 st.set_page_config(page_title="Hackathon Finder AI", page_icon="🔎", layout="wide")
@@ -57,7 +61,7 @@ with right:
     use_ai = st.checkbox(
         "Use OpenRouter AI relevance ranking (optional)",
         value=False,
-        help="Disabled by default to avoid free-tier rate limits. Deterministic filters and local ranking work without AI.",
+        help="Disabled by default to avoid free-tier rate limits. Search and local ranking work without AI.",
     )
 
 if age < 18:
@@ -71,39 +75,36 @@ if st.button("Search for hackathons", type="primary", use_container_width=True):
     else:
         with st.spinner("Searching event pages and filtering directories, guides, duplicates, and past listings..."):
             result = find_hackathons(interests, details, start_date, end_date, use_ollama=False)
-            if result.get("results"):
-                before_filter = len(result["results"])
-                result["results"] = [
-                    item for item in result["results"]
-                    if _matches_search_preferences(item, interests, details)
-                ]
-                result.setdefault("search_diagnostics", {})["preference_filtered_count"] = before_filter - len(result["results"])
-            if use_ai and result.get("results"):
+            # Exclude only events explicitly dated outside the requested period. Results
+            # without date evidence are shown separately, never presented as confirmed.
+            candidates = [item for item in result.get("results", []) if item.get("date_fit") is not False]
+            confirmed, possible = _split_candidates(candidates, interests)
+            result["confirmed_results"] = confirmed
+            result["possible_results"] = possible
+            if use_ai and (confirmed or possible):
+                to_score = confirmed + possible
                 with st.spinner("Scoring results with OpenRouter..."):
                     ai = analyze_with_openrouter(
-                        result["results"],
+                        to_score,
                         f"Interests: {interests}\nAdditional details: {details}",
                         start_date,
                         end_date,
                     )
                 result["ai_available"] = ai["available"]
                 result["ai_message"] = ai["message"]
-                for item in result["results"]:
+                for item in to_score:
                     annotation = ai["annotations"].get(item["id"])
                     if annotation:
                         item["ai_score"] = annotation["score"]
                         item["reason"] = annotation["reason"]
-                result["results"].sort(
-                    key=lambda item: -item.get("ai_score", item.get("local_relevance", 0))
-                )
+                confirmed.sort(key=lambda item: -item.get("ai_score", item.get("local_relevance", 0)))
+                possible.sort(key=lambda item: -item.get("ai_score", item.get("local_relevance", 0)))
             else:
                 result["ai_available"] = False
                 result["ai_message"] = "AI ranking is off; using local ranking."
-            if not result.get("results"):
-                result["message"] = (
-                    "No results had verified date evidence inside your selected period and matched all requested topics/constraints. "
-                    "Try a wider date range or simpler preferences; the app omits events with unknown dates rather than guessing."
-                )
+            if not confirmed and not possible:
+                result["message"] = "No relevant candidates were found. Try broader interests or a wider date range."
+            result["results"] = confirmed + possible
             st.session_state["live_search_result"] = result
 
 result = st.session_state.get("live_search_result")
@@ -111,24 +112,29 @@ if result:
     if result.get("error"):
         st.error(result.get("message", "Search failed."))
     elif not result.get("results"):
-        st.info(result.get("message", "No individual event pages matched your interests and dates."))
+        st.info(result.get("message", "No individual event candidates were found."))
         with st.expander("Search diagnostics"):
             st.json(result.get("search_diagnostics", {}))
     else:
-        st.success(f"Showing {len(result['results'])} individual event-page candidates matched to your interests and date range.")
+        confirmed = result.get("confirmed_results", [])
+        possible = result.get("possible_results", [])
+        if confirmed:
+            st.success(f"{len(confirmed)} candidate(s) have date evidence inside your selected period.")
         if result.get("ai_available"):
-            st.caption("OpenRouter added relevance scores. It does not verify event details or eligibility.")
+            st.caption("OpenRouter added relevance ranking; it does not verify event details or eligibility.")
         elif use_ai and result.get("ai_message"):
             st.warning(result["ai_message"])
         else:
-            st.caption("Using deterministic date/topic filters and the built-in local ranker; OpenRouter is optional.")
+            st.caption("Using local relevance ranking. OpenRouter is optional and disabled by default.")
 
-        for item in result["results"]:
+        def render_event(item: dict) -> None:
             st.markdown(f"### {item['name']}")
             if "ai_score" in item:
                 st.caption(f"AI relevance: {item['ai_score']}/100")
             st.write(item.get("reason", "Potential event page; verify details."))
             st.caption(item.get("date_match", "Date not confirmed"))
+            for note in _preference_status(item, details):
+                st.caption(note)
             if item.get("snippet"):
                 st.write(item["snippet"])
             st.link_button("Open event page/source", item["url"])
@@ -172,3 +178,13 @@ if result:
                         st.write("Your age matches the recorded rule." if matches else "Your age does not match the recorded rule.")
                     st.caption("Human-reviewed, session-only; this is not automatic certification.")
             st.divider()
+
+        if confirmed:
+            st.subheader("Date evidence in your selected range")
+            for item in confirmed:
+                render_event(item)
+        if possible:
+            st.subheader("Possible matches — dates need verification")
+            st.warning("These results mention your interests but the search snippet does not confirm dates in your selected period. Check each event's official page before treating it as a match.")
+            for item in possible:
+                render_event(item)
