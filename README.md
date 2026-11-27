@@ -1,25 +1,23 @@
 # Hackathon Finder
 
-A small browser-based directory that helps you search hackathons directly on event-hosting platforms. It intentionally does not use DuckDuckGo or another general-purpose search engine, and it does not scrape aggregator snippets and present them as verified events.
+The app checks public event-hosting platform pages for structured event listings. It no longer uses DuckDuckGo, another general search engine, or general web-result snippets.
 
-## Open the app
+## What the app does
 
-Open the deployed app URL, enter interests/preferences and a date range, then select **Show official event platforms**. Copy the prepared search phrase, open a platform, and use that platform's own search/date filters. Check each event's organizer page for dates, registration, location, and age eligibility.
+1. Enter interests/preferences and a date range.
+2. The server checks the public browse pages of Devpost, Devfolio, MLH, Unstop, Eventbrite, and Luma.
+3. Where the platform page exposes event links and Schema.org `Event` JSON-LD, the app reads a small number of individual event pages and extracts title, dates, description, and location.
+4. It displays only links on the corresponding official platform domains, and filters known dates outside the selected period. Events with no structured date are labeled unverified.
 
-Included source portals: Devpost, Devfolio, Major League Hacking (MLH), Unstop, Eventbrite, and Luma.
-
-**Important limitation:** These platforms do not provide one shared, public, unauthenticated API for searching all listings. This app therefore links directly to the platforms rather than claiming to automatically retrieve or verify their events. The links are official platform pages, but individual listings still need human verification.
+Coverage is best-effort, not comprehensive. Some platforms render listings in JavaScript, have no public unauthenticated API, or may limit automated access. If a source returns no data, the app reports that in diagnostics rather than quietly falling back to DuckDuckGo or inventing events. Check each event's organizer page for the current schedule, registration, and eligibility. Automated access should comply with the platforms' terms and robots rules.
 
 ## Deploy once for browser access
 
-Deployment is a one-time setup by the app owner; visitors do not need to install Python, Ollama, or an API key. For a minor project owner, have a parent/guardian check the hosting provider's current account and age requirements and manage deployment if necessary.
+Visitors need only the deployed app URL. They do not install Python, Ollama, or search-provider credentials. A minor project owner should have a parent/guardian review the hosting provider's current account requirements and manage deployment if necessary.
 
-1. Push this repository to GitHub.
-2. The account owner connects it to Streamlit Community Cloud (or another compatible Streamlit host).
-3. Set the entry point to `app.py` and deploy. The host installs `requirements.txt`.
-4. Share the resulting app URL.
-
-No search-provider credentials or AI keys are required.
+1. Push the repository to GitHub.
+2. Connect it to a compatible Streamlit host, set `app.py` as the entry point, and deploy.
+3. Share the resulting app URL. The host installs dependencies from `requirements.txt`.
 
 ## Run locally for development
 
