@@ -1,28 +1,27 @@
-# Hackathon Finder AI
+# Hackathon Finder
 
-A browser-based hackathon finder built with Streamlit. Once the app is deployed, visitors open its link and search immediately—no Python, Ollama, API key, or separate downloads are required on their devices.
+A small browser-based directory that helps you search hackathons directly on event-hosting platforms. It intentionally does not use DuckDuckGo or another general-purpose search engine, and it does not scrape aggregator snippets and present them as verified events.
 
 ## Open the app
 
-Use the public app URL provided by the person who deployed it. Enter interests and a date range, then select **Search for hackathons**. OpenRouter AI ranking is optional and disabled by default; the finder works without an AI key or a locally installed model.
+Open the deployed app URL, enter interests/preferences and a date range, then select **Show official event platforms**. Copy the prepared search phrase, open a platform, and use that platform's own search/date filters. Check each event's organizer page for dates, registration, location, and age eligibility.
 
-> Search listings are candidates, not guarantees. Check dates, eligibility, and registration on the organizer's official page. Public search providers may be incomplete or temporarily unavailable.
+Included source portals: Devpost, Devfolio, Major League Hacking (MLH), Unstop, Eventbrite, and Luma.
+
+**Important limitation:** These platforms do not provide one shared, public, unauthenticated API for searching all listings. This app therefore links directly to the platforms rather than claiming to automatically retrieve or verify their events. The links are official platform pages, but individual listings still need human verification.
 
 ## Deploy once for browser access
 
-Deployment is a one-time setup by the app owner; visitors do not repeat it or install dependencies. For a 14-year-old project owner, ask a parent/guardian to review the hosting provider's current age and account terms and manage deployment if required.
+Deployment is a one-time setup by the app owner; visitors do not need to install Python, Ollama, or an API key. For a minor project owner, have a parent/guardian check the hosting provider's current account and age requirements and manage deployment if necessary.
 
 1. Push this repository to GitHub.
-2. The account owner opens [Streamlit Community Cloud](https://share.streamlit.io/) and connects the repository, following the host's current account requirements.
-3. Create an app using this repository's `main` branch and `app.py` as the entry point.
-4. Deploy. The host installs the Python packages listed in `requirements.txt` automatically.
-5. Share the resulting app URL. Later commits to the configured branch are deployed by the host automatically.
+2. The account owner connects it to Streamlit Community Cloud (or another compatible Streamlit host).
+3. Set the entry point to `app.py` and deploy. The host installs `requirements.txt`.
+4. Share the resulting app URL.
 
-No secrets are needed for the default search and local ranking. Do not configure an AI API key unless the account owner has checked the provider's age, billing, and usage terms. Never commit secrets to the repository. Ollama is not part of the hosted workflow and visitors do not need to install it.
+No search-provider credentials or AI keys are required.
 
-## Run locally (for development only)
-
-You only need to install these tools on the computer used for development—not on every visitor's device:
+## Run locally for development
 
 ```bash
 python -m venv .venv
@@ -32,14 +31,6 @@ streamlit run app.py
 ```
 
 Windows PowerShell activation: `.venv\\Scripts\\Activate.ps1`.
-
-## Optional OpenRouter AI ranking
-
-AI ranking is optional. If enabled, the server needs an OpenRouter API key supplied through its secret manager or environment; visitors should never provide or see that key. Only configure this after an adult account owner reviews the provider's current terms, age requirements, free-tier limits, and possible charges. With AI disabled or unavailable, search and local ranking continue to work.
-
-## Search and eligibility
-
-The app discovers candidates through public web search and applies local filters. Search may be rate-limited, outdated, or incomplete. It does not certify event dates or age eligibility. Open each organizer's official page and verify the rules yourself.
 
 ## Tests
 
