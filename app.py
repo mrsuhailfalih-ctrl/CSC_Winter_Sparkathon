@@ -14,26 +14,30 @@ def _preference_tokens(text: str) -> set[str]:
 
 
 def _matches_search_preferences(item: dict, interests: str, details: str) -> bool:
-    """Hide results with no topical match and events known to be outside the chosen dates."""
-    if item.get("date_fit") is False:
+    """Be conservative: require date evidence and every requested topic/constraint."""
+    # Unknown dates are not evidence that an event is happening in the requested period.
+    if item.get("date_fit") is not True:
         return False
 
     evidence = f"{item.get('name', '')} {item.get('snippet', '')}".lower()
     evidence_terms = _preference_tokens(evidence)
     interest_terms = _preference_tokens(interests)
-    if interest_terms:
-        # AI is often written out as "artificial intelligence" in event listings.
-        interest_matches = set(interest_terms & evidence_terms)
-        if "ai" in interest_terms and ("artificial" in evidence_terms or "intelligence" in evidence_terms):
-            interest_matches.add("ai")
-        if not interest_matches:
-            return False
+    if "ai" in interest_terms and ("artificial" in evidence_terms or "intelligence" in evidence_terms):
+        evidence_terms.add("ai")
+    if not interest_terms.issubset(evidence_terms):
+        return False
 
     detail_terms = _preference_tokens(details)
-    # Respect explicit online/remote preferences while allowing common equivalent wording.
     if detail_terms & {"online", "virtual", "remote"}:
         if not re.search(r"\b(online|virtual|remote|remote-first|anywhere|worldwide)\b", evidence):
             return False
+    if "free" in detail_terms:
+        if not re.search(r"\b(free|no cost|without charge|free to enter|free entry)\b", evidence):
+            return False
+    # Enforce any other specific words the user provided too.
+    remaining_details = detail_terms - {"online", "virtual", "remote", "free"}
+    if not remaining_details.issubset(evidence_terms):
+        return False
     return True
 
 
@@ -51,9 +55,9 @@ with right:
     start_date = st.date_input("Earliest event date", key="period_start")
     end_date = st.date_input("Latest event date", key="period_end")
     use_ai = st.checkbox(
-        "Use OpenRouter AI relevance ranking",
-        value=True,
-        help="Uses the configured server-side OpenRouter API key and Gemma free model. Without a key, local ranking continues to work.",
+        "Use OpenRouter AI relevance ranking (optional)",
+        value=False,
+        help="Disabled by default to avoid free-tier rate limits. Deterministic filters and local ranking work without AI.",
     )
 
 if age < 18:
@@ -90,17 +94,16 @@ if st.button("Search for hackathons", type="primary", use_container_width=True):
                         item["ai_score"] = annotation["score"]
                         item["reason"] = annotation["reason"]
                 result["results"].sort(
-                    key=lambda item: (
-                        item.get("date_fit") is not True,
-                        item.get("date_fit") is False,
-                        -item.get("ai_score", item.get("local_relevance", 0)),
-                    )
+                    key=lambda item: -item.get("ai_score", item.get("local_relevance", 0))
                 )
             else:
                 result["ai_available"] = False
                 result["ai_message"] = "AI ranking is off; using local ranking."
-            if not result.get("results") and not result.get("message"):
-                result["message"] = "No results matched your interests, online preference, and selected dates. Try broadening the interests or date range."
+            if not result.get("results"):
+                result["message"] = (
+                    "No results had verified date evidence inside your selected period and matched all requested topics/constraints. "
+                    "Try a wider date range or simpler preferences; the app omits events with unknown dates rather than guessing."
+                )
             st.session_state["live_search_result"] = result
 
 result = st.session_state.get("live_search_result")
@@ -114,11 +117,11 @@ if result:
     else:
         st.success(f"Showing {len(result['results'])} individual event-page candidates matched to your interests and date range.")
         if result.get("ai_available"):
-            st.caption("OpenRouter Gemma added relevance scores and explanations. Dates and eligibility still need official-page verification.")
+            st.caption("OpenRouter added relevance scores. It does not verify event details or eligibility.")
         elif use_ai and result.get("ai_message"):
             st.warning(result["ai_message"])
         else:
-            st.caption("Using the built-in local relevance ranker; OpenRouter is optional.")
+            st.caption("Using deterministic date/topic filters and the built-in local ranker; OpenRouter is optional.")
 
         for item in result["results"]:
             st.markdown(f"### {item['name']}")
