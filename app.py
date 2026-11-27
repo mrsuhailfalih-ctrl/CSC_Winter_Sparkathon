@@ -4,6 +4,7 @@ import streamlit as st
 
 from utils.eligibility import parse_age_bounds, verify_age_rule
 from utils.live_search import find_hackathons
+from utils.openrouter_ai import analyze_with_openrouter
 
 st.set_page_config(page_title="Hackathon Finder AI", page_icon="🔎", layout="wide")
 st.title("🔎 Live Hackathon Finder")
@@ -18,7 +19,11 @@ with left:
 with right:
     start_date = st.date_input("Earliest event date", key="period_start")
     end_date = st.date_input("Latest event date", key="period_end")
-    use_ollama = st.checkbox("Use local Ollama AI summaries", value=True, help="AI runs only if Ollama and its model are installed on the same machine as this app. Search still works without it.")
+    use_ai = st.checkbox(
+        "Use OpenRouter AI relevance ranking",
+        value=True,
+        help="Uses the configured server-side OpenRouter API key and Gemma free model. Without a key, local ranking continues to work.",
+    )
 
 if age < 18:
     st.warning("Some events require parental consent or have additional eligibility rules for minors.")
@@ -30,7 +35,34 @@ if st.button("Search for hackathons", type="primary", use_container_width=True):
         st.error("The start date must be on or before the latest date.")
     else:
         with st.spinner("Searching event pages and filtering directories, guides, duplicates, and past listings..."):
-            st.session_state["live_search_result"] = find_hackathons(interests, details, start_date, end_date, use_ollama=use_ollama)
+            result = find_hackathons(interests, details, start_date, end_date, use_ollama=False)
+            if use_ai and result.get("results"):
+                with st.spinner("Scoring results with OpenRouter..."):
+                    ai = analyze_with_openrouter(
+                        result["results"],
+                        f"Interests: {interests}\nAdditional details: {details}",
+                        start_date,
+                        end_date,
+                    )
+                result["ai_available"] = ai["available"]
+                result["ai_message"] = ai["message"]
+                for item in result["results"]:
+                    annotation = ai["annotations"].get(item["id"])
+                    if annotation:
+                        item["ai_score"] = annotation["score"]
+                        item["reason"] = annotation["reason"]
+                # Preserve date-fit priority; use AI score to rank within each date group.
+                result["results"].sort(
+                    key=lambda item: (
+                        item.get("date_fit") is not True,
+                        item.get("date_fit") is False,
+                        -item.get("ai_score", item.get("local_relevance", 0)),
+                    )
+                )
+            else:
+                result["ai_available"] = False
+                result["ai_message"] = "AI ranking is off; using local ranking."
+            st.session_state["live_search_result"] = result
 
 result = st.session_state.get("live_search_result")
 if result:
@@ -43,14 +75,16 @@ if result:
     else:
         st.success(f"Found {len(result['results'])} individual event-page candidates after filtering and deduplication.")
         if result.get("ai_available"):
-            st.caption("Local Ollama added brief relevance explanations. It did not verify dates or eligibility.")
-        elif use_ollama:
-            st.warning(result.get("ai_message", "Ollama is unavailable; using local ranking."))
+            st.caption("OpenRouter Gemma added relevance scores and explanations. Dates and eligibility still need official-page verification.")
+        elif use_ai and result.get("ai_message"):
+            st.warning(result["ai_message"])
         else:
-            st.caption("Using the built-in free local ranker; Ollama is optional.")
+            st.caption("Using the built-in free local ranker; OpenRouter is optional.")
 
         for item in result["results"]:
             st.markdown(f"### {item['name']}")
+            if "ai_score" in item:
+                st.caption(f"AI relevance: {item['ai_score']}/100")
             st.write(item.get("reason", "Potential event page; verify details."))
             st.caption(item.get("date_match", "Date not confirmed"))
             if item.get("snippet"):

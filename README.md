@@ -11,25 +11,28 @@ streamlit run app.py
 
 Windows PowerShell activation: `.venv\\Scripts\\Activate.ps1`.
 
-Search works without Ollama, an API key, or model weights. It uses public DuckDuckGo results, targets event platforms, removes directory/guide/past pages and deduplicates results. Search quality and availability are limited by the public search provider; verify all details with event organizers.
+## Optional OpenRouter AI ranking
 
-## Optional local AI summaries
+The app can use OpenRouter's `google/gemma-4-26b-a4b-it:free` model to score and explain search candidates. Search and deterministic local ranking continue to work if AI is disabled, the API key is missing, the model is unavailable, or a free-tier limit is reached.
 
-The AI option uses Ollama's local HTTP API with Qwen 2.5 3B by default. To enable it, install Ollama on the same computer that runs Streamlit, then run:
+1. Create an OpenRouter API key under an account that is eligible under OpenRouter's current terms. A parent or guardian should review account eligibility and supervise use for anyone under 18.
+2. In local development, create `.streamlit/secrets.toml` (this file must not be committed) with:
 
-```bash
-ollama pull qwen2.5:3b
-ollama serve
+```toml
+OPENROUTER_API_KEY = "your-key-here"
 ```
 
-The app checks that Ollama is reachable and the model is installed before calling it, then uses `/api/chat` with JSON output. If unavailable, it displays a specific setup message and keeps showing results using deterministic local ranking. Configure `OLLAMA_MODEL` and `OLLAMA_BASE_URL` as environment variables if needed.
+   Or set `OPENROUTER_API_KEY` in the server environment. Streamlit Community Cloud: add the same key in the app's **Settings → Secrets**.
+3. Run the app and leave **Use OpenRouter AI relevance ranking** enabled.
 
-A public website cannot use Ollama on the visitor's laptop. Hosting a model for all website visitors requires server compute; no hosted inference is promised to be both reliable, effective, and free. Do not expose Ollama directly to the public internet.
+The key is only read by the Python server and is sent to OpenRouter's API; it is never included in the page or result data. Optional `OPENROUTER_MODEL` overrides the model ID. Free access and rate limits may change. The app sends only event search titles/snippets and requested dates, limits output size, and validates returned candidate IDs before using explanations/scores.
 
-## Result quality
+## Search and eligibility
 
-Search queries target individual event URLs on Devpost, Devfolio, and Unstop plus general event-registration results. Generic directories (including `/hackathons` index pages), guide/news/archive pages, and stale editions are filtered. URL tracking parameters and likely duplicate event titles are normalized/merged. Dates are reported as evidence from snippets, never treated as official confirmation. An event page not matching known URL patterns may still appear, but every link must be verified manually.
+Search uses public web results, targets individual event pages, and filters obvious directories, guides, and stale editions. Search can be rate-limited or inaccurate; confirm dates, registration, and eligibility on the organizer's official page. Age-rule extraction is only a clue, not an eligibility decision.
 
-Every result includes an official-page and age-rule review section. The age evidence extractor is only a clue; read the current organizer rules and manually confirm eligibility.
+## Tests
 
-Tests: `python -m unittest discover -s tests -v`
+```bash
+python -m unittest discover -s tests -v
+```
