@@ -12,7 +12,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import requests
 from ddgs import DDGS
 
-EDITORIAL_TITLE = re.compile(r"\b(guide|faq|resources?|top\s+\d+|best\s+\d+|news|blog|press release|announc(?:e|es|ement)|upcoming events|how to participate|official guide|recap|retrospective|winners?|results|highlights|past events|what happened)\b", re.I)
+EDITORIAL_TITLE = re.compile(r"\b(guide|faq|resources?|top\s+\d+|best\s+\d+|news|blog|press release|announcement|upcoming events|how to participate|official guide|recap|retrospective|winners?|results|highlights|past events|what happened)\b", re.I)
 EDITORIAL_PATH = re.compile(r"/(?:blog|news|guides?|resources?|archive|past-events?|recaps?)(?:/|$)", re.I)
 PAST_LANGUAGE = re.compile(r"\b(was held|were held|took place|has concluded|have concluded|ended on|winners? (?:were|have been) announced|recap|retrospective|last year's event)\b", re.I)
 GENERIC_WORDS = {"hackathon", "hackathons", "event", "events", "the", "and", "for", "with", "international", "global", "official", "register", "registration", "free", "high", "school", "student", "students", "online", "virtual", "competition", "challenge"}
@@ -23,19 +23,27 @@ DATE_PATTERNS = [
     re.compile(r"\b(20\d{2})-(0?[1-9]|1[0-2])-(0?[1-9]|[12]\d|3[01])\b"),
 ]
 TRACKING_KEYS = {"ref", "source", "fbclid", "gclid", "mc_cid", "mc_eid"}
-DIRECTORY_HOSTS = {"aiwhatson.com", "mlh.io", "devpost.com"}
-DIRECTORY_PATHS = {"/hackathons", "/events", "/hackathons/", "/events/", "/seasons"}
-EVENT_PLATFORM_PATHS = {
-    "devpost.com": ("/hackathons/",), "devfolio.co": ("/hackathons/",),
-    "unstop.com": ("/hackathons/",), "mlh.io": ("/seasons/",),
-    "eventbrite.com": ("/e/",), "lu.ma": ("/",),
+GENERIC_PATHS = {"/hackathons", "/events", "/seasons", "/search", "/browse", "/upcoming"}
+# These are event-listing platforms, not a guarantee that every URL is an event page.
+PLATFORM_PATHS = {
+    "devpost.com": ("/hackathons/",),
+    "devfolio.co": ("/hackathons/",),
+    "unstop.com": ("/hackathons/",),
+    "mlh.io": ("/seasons/",),
+    "eventbrite.com": ("/e/",),
+    "lu.ma": ("/",),
+    "luma.com": ("/",),
+}
+PLATFORM_NAMES = {
+    "devpost.com": "Devpost", "devfolio.co": "Devfolio", "unstop.com": "Unstop",
+    "mlh.io": "MLH", "eventbrite.com": "Eventbrite", "lu.ma": "Luma", "luma.com": "Luma",
 }
 
 
 def _normalize_url(url: str) -> str:
     try:
         parts = urlsplit(url.strip())
-        if parts.scheme.lower() != "https" or not parts.hostname or parts.username or parts.password:
+        if parts.scheme.lower() not in {"http", "https"} or not parts.hostname or parts.username or parts.password:
             return ""
         host = parts.hostname.lower().removeprefix("www.")
         path = re.sub(r"/{2,}", "/", parts.path).rstrip("/") or "/"
@@ -44,6 +52,17 @@ def _normalize_url(url: str) -> str:
         return urlunsplit(("https", host, path, urlencode(query), ""))
     except (TypeError, ValueError):
         return ""
+
+
+def _platform_for_url(url: str) -> str | None:
+    try:
+        host = (urlsplit(url).hostname or "").lower().removeprefix("www.")
+    except ValueError:
+        return None
+    for domain, name in PLATFORM_NAMES.items():
+        if host == domain or host.endswith("." + domain):
+            return name
+    return None
 
 
 def _tokens(text: str) -> set[str]:
@@ -71,20 +90,27 @@ def _dates(text: str) -> list[date]:
 
 
 def _specific_event_page(url: str, title: str, snippet: str) -> bool:
-    parsed = urlsplit(url)
-    host, path = parsed.hostname or "", parsed.path.rstrip("/").lower() or "/"
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return False
+    host = (parsed.hostname or "").lower().removeprefix("www.")
+    path = parsed.path.rstrip("/").lower() or "/"
     if EDITORIAL_TITLE.search(title) or EDITORIAL_PATH.search(path):
         return False
-    if path in DIRECTORY_PATHS or path.count("/") < 1:
-        return False
-    if host in DIRECTORY_HOSTS and path in {"/hackathons", "/events", "/seasons"}:
+    if path in GENERIC_PATHS or path == "/":
         return False
     text = f"{title} {snippet}".lower()
-    if not any(term in text for term in ("hackathon", "hack-a-thon", "hack day", "register", "registration", "submit your project")):
+    if not any(term in text for term in ("hackathon", "hack-a-thon", "hack day", "register", "registration", "submit your project", "apply", "prizes", "challenge")):
         return False
-    for domain, prefixes in EVENT_PLATFORM_PATHS.items():
+
+    for domain, prefixes in PLATFORM_PATHS.items():
         if host == domain or host.endswith("." + domain):
-            return any(path.startswith(prefix) and len(path.strip("/").split("/")) >= (3 if domain == "mlh.io" else 2) for prefix in prefixes)
+            # MLH uses both events.mlh.io/events/<id> and mlh.io/seasons/<year>/events/<id>.
+            if domain == "mlh.io":
+                return (path.startswith("/events/") and len(path.strip("/").split("/")) >= 2) or (path.startswith("/seasons/") and len(path.strip("/").split("/")) >= 4)
+            return any(path.startswith(prefix) and len(path.strip("/").split("/")) >= (2 if domain in {"eventbrite.com", "lu.ma", "luma.com"} else 2) for prefix in prefixes)
+
     slug = path.strip("/").split("/")[-1]
     return slug not in {"hackathons", "events", "search", "browse", "upcoming", "all"} and len(_tokens(title)) >= 1
 
@@ -95,9 +121,11 @@ def _clean_result(raw: dict[str, Any]) -> dict[str, Any] | None:
     snippet = re.sub(r"\s+", " ", str(raw.get("body") or raw.get("snippet") or "")).strip()
     if not url or not title or not _specific_event_page(url, title, snippet):
         return None
+    platform = _platform_for_url(url)
     return {
         "id": hashlib.sha256(url.encode()).hexdigest()[:12], "name": title[:240],
-        "url": url, "snippet": snippet[:900], "_title_tokens": _tokens(title),
+        "url": url, "snippet": snippet[:900], "source_platform": platform,
+        "source_priority": 0 if platform else 1, "_title_tokens": _tokens(title),
         "_dates": _dates(f"{title}. {snippet}"),
         "_title_years": {int(y) for y in re.findall(r"\b20\d{2}\b", title)},
         "_past_language": bool(PAST_LANGUAGE.search(f"{title} {snippet}")),
@@ -121,14 +149,15 @@ def _merge_and_dedupe(raw_results: list[dict[str, Any]]) -> list[dict[str, Any]]
             continue
         old = next((candidate for candidate in merged if _same_event(candidate, item)), None)
         if old:
-            if len(item["snippet"]) > len(old["snippet"]):
-                old["snippet"] = item["snippet"]
-                old["url"] = item["url"]
-                old["name"] = item["name"]
-                old["id"] = item["id"]
             old["_dates"] = sorted(set(old["_dates"] + item["_dates"]))
             old["_title_years"] |= item["_title_years"]
             old["_past_language"] |= item["_past_language"]
+            # Keep the canonical platform listing when another source duplicates it.
+            if item["source_priority"] < old["source_priority"]:
+                for key in ("url", "name", "id", "source_platform", "source_priority"):
+                    old[key] = item[key]
+            if len(item["snippet"]) > len(old["snippet"]):
+                old["snippet"] = item["snippet"]
         else:
             merged.append(item)
     return merged
@@ -159,23 +188,29 @@ def _search_hackathons(
         raise ValueError("The start date must be on or before the latest date.")
     topic = " ".join(part.strip() for part in (interests, details) if part and part.strip())
     years = " ".join(str(y) for y in range(start.year, end.year + 1))
-    queries = [
-        f"site:devpost.com/hackathons {topic} {years} register",
-        f"site:devfolio.co/hackathons {topic} {years}",
-        f"site:unstop.com/hackathons {topic} {years}",
-        f"hackathon event registration {topic} {years} -guide -FAQ -recap -directory",
-        f"high school hackathon register {topic} {years} -guide -FAQ",
+    # Search platform domains individually first. General web discovery is a
+    # deliberate fallback and results from official platforms sort ahead of it.
+    platform_queries = [
+        f"site:devpost.com/hackathons {topic} {years} hackathon",
+        f"site:devfolio.co/hackathons {topic} {years} hackathon",
+        f"site:mlh.io OR site:events.mlh.io {topic} {years} hackathon",
+        f"site:unstop.com/hackathons {topic} {years} hackathon",
+        f"site:eventbrite.com/e {topic} {years} hackathon",
+        f"site:lu.ma OR site:luma.com {topic} {years} hackathon",
     ]
-    raw, succeeded, errors = _run_search(queries, max(8, max_results))
+    broad_queries = [
+        f"hackathon event registration {topic} {years} -guide -FAQ -recap -directory",
+        f"student hackathon register {topic} {years} -guide -FAQ",
+    ]
+    raw, succeeded, errors = _run_search(platform_queries, max(5, max_results // 2))
+    platform_count = len(raw)
+    # Always make a couple of broad queries to fill gaps; these come after the
+    # named event-platform searches and remain lower priority in ranking.
+    broad_raw, broad_ok, broad_errors = _run_search(broad_queries, max(5, max_results // 2))
+    raw.extend(broad_raw)
+    succeeded += broad_ok
+    errors.extend(broad_errors)
     results = _merge_and_dedupe(raw)
-    if not results:
-        fallback, fallback_ok, fallback_errors = _run_search(
-            [f"hackathon registration {topic}", "student hackathon register upcoming"], 12
-        )
-        raw.extend(fallback)
-        succeeded += fallback_ok
-        errors.extend(fallback_errors)
-        results = _merge_and_dedupe(raw)
 
     requested_years = set(range(start.year, end.year + 1))
     output = []
@@ -198,11 +233,16 @@ def _search_hackathons(
             item["date_fit"] = None
             item["date_match"] = "Event date not found in search snippet—verify on event page"
         output.append(item)
-    return output[:max_results], {"queries_succeeded": succeeded, "query_errors": errors, "raw_count": len(raw), "candidate_count": len(results)}
+    output.sort(key=lambda item: (item["source_priority"], -len(_tokens(item["name"] + " " + item["snippet"]))))
+    return output[:max_results], {
+        "queries_succeeded": succeeded, "query_errors": errors, "raw_count": len(raw),
+        "platform_raw_count": platform_count, "candidate_count": len(results),
+        "platform_candidates": sum(bool(item.get("source_platform")) for item in output),
+    }
 
 
 def search_hackathons(interests: str, details: str, start_date: date, end_date: date, max_results: int = 20) -> list[dict[str, Any]]:
-    """Public compatibility wrapper: return only individual event candidates."""
+    """Public compatibility wrapper: return individual event candidates."""
     return _search_hackathons(interests, details, start_date, end_date, max_results)[0]
 
 
@@ -214,8 +254,12 @@ def _local_rank(candidates: list[dict[str, Any]], interests: str, details: str) 
     terms = _tokens_for_rank(f"{interests} {details}")
     for item in candidates:
         matched = sorted(terms & _tokens_for_rank(item["name"] + " " + item["snippet"]))
-        item["local_relevance"] = len(matched)
-        item["reason"] = ("Search result mentions: " + ", ".join(matched[:6]) + ". Verify on event page." if matched else "Potential event page; compare its details with your preferences.")
+        # Prefer an event's listing on the platforms explicitly requested.
+        platform_bonus = 3 if item.get("source_platform") else 0
+        item["local_relevance"] = len(matched) + platform_bonus
+        relevance = ", ".join(matched[:6])
+        prefix = f"Official {item['source_platform']} event-platform result. " if item.get("source_platform") else ""
+        item["reason"] = prefix + ("Search result mentions: " + relevance + ". Verify on event page." if relevance else "Potential event page; compare its details with your preferences.")
 
 
 def _ollama_status(base_url: str, model: str) -> tuple[bool, str]:
@@ -284,7 +328,7 @@ def find_hackathons(interests: str, details: str, start_date: date, end_date: da
         if diagnostics["queries_succeeded"] == 0:
             message = "The public search provider could not be reached or rate-limited the request. Check internet access and try again shortly."
         else:
-            message = f"Search ran ({diagnostics['raw_count']} raw results) but none looked like an individual event page after filtering directories, guides, and stale editions. Try broader interests/dates."
+            message = f"Search ran ({diagnostics['raw_count']} raw results) but none looked like an individual event page after filtering directories, guides, and stale editions. Try broader interests or dates."
         return {"error": False, "results": [], "message": message, "search_available": diagnostics["queries_succeeded"] > 0, "search_diagnostics": diagnostics, "ai_available": False, "ai_message": ""}
 
     _local_rank(candidates, interests, details)
