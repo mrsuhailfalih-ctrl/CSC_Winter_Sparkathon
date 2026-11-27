@@ -1,10 +1,41 @@
 import hashlib
+import re
 
 import streamlit as st
 
 from utils.eligibility import parse_age_bounds, verify_age_rule
 from utils.live_search import find_hackathons
 from utils.openrouter_ai import analyze_with_openrouter
+
+
+def _preference_tokens(text: str) -> set[str]:
+    ignored = {"and", "the", "for", "with", "from", "that", "this", "any", "are", "you", "your", "want", "looking", "hackathon", "hackathons", "event", "events"}
+    return {word for word in re.findall(r"[a-z0-9]+", text.lower()) if (len(word) >= 3 or word == "ai") and word not in ignored}
+
+
+def _matches_search_preferences(item: dict, interests: str, details: str) -> bool:
+    """Hide results with no topical match and events known to be outside the chosen dates."""
+    if item.get("date_fit") is False:
+        return False
+
+    evidence = f"{item.get('name', '')} {item.get('snippet', '')}".lower()
+    evidence_terms = _preference_tokens(evidence)
+    interest_terms = _preference_tokens(interests)
+    if interest_terms:
+        # AI is often written out as "artificial intelligence" in event listings.
+        interest_matches = set(interest_terms & evidence_terms)
+        if "ai" in interest_terms and ("artificial" in evidence_terms or "intelligence" in evidence_terms):
+            interest_matches.add("ai")
+        if not interest_matches:
+            return False
+
+    detail_terms = _preference_tokens(details)
+    # Respect explicit online/remote preferences while allowing common equivalent wording.
+    if detail_terms & {"online", "virtual", "remote"}:
+        if not re.search(r"\b(online|virtual|remote|remote-first|anywhere|worldwide)\b", evidence):
+            return False
+    return True
+
 
 st.set_page_config(page_title="Hackathon Finder AI", page_icon="🔎", layout="wide")
 st.title("🔎 Live Hackathon Finder")
@@ -36,6 +67,13 @@ if st.button("Search for hackathons", type="primary", use_container_width=True):
     else:
         with st.spinner("Searching event pages and filtering directories, guides, duplicates, and past listings..."):
             result = find_hackathons(interests, details, start_date, end_date, use_ollama=False)
+            if result.get("results"):
+                before_filter = len(result["results"])
+                result["results"] = [
+                    item for item in result["results"]
+                    if _matches_search_preferences(item, interests, details)
+                ]
+                result.setdefault("search_diagnostics", {})["preference_filtered_count"] = before_filter - len(result["results"])
             if use_ai and result.get("results"):
                 with st.spinner("Scoring results with OpenRouter..."):
                     ai = analyze_with_openrouter(
@@ -51,7 +89,6 @@ if st.button("Search for hackathons", type="primary", use_container_width=True):
                     if annotation:
                         item["ai_score"] = annotation["score"]
                         item["reason"] = annotation["reason"]
-                # Preserve date-fit priority; use AI score to rank within each date group.
                 result["results"].sort(
                     key=lambda item: (
                         item.get("date_fit") is not True,
@@ -62,6 +99,8 @@ if st.button("Search for hackathons", type="primary", use_container_width=True):
             else:
                 result["ai_available"] = False
                 result["ai_message"] = "AI ranking is off; using local ranking."
+            if not result.get("results") and not result.get("message"):
+                result["message"] = "No results matched your interests, online preference, and selected dates. Try broadening the interests or date range."
             st.session_state["live_search_result"] = result
 
 result = st.session_state.get("live_search_result")
@@ -69,17 +108,17 @@ if result:
     if result.get("error"):
         st.error(result.get("message", "Search failed."))
     elif not result.get("results"):
-        st.info(result.get("message", "No individual event pages were found."))
+        st.info(result.get("message", "No individual event pages matched your interests and dates."))
         with st.expander("Search diagnostics"):
             st.json(result.get("search_diagnostics", {}))
     else:
-        st.success(f"Found {len(result['results'])} individual event-page candidates after filtering and deduplication.")
+        st.success(f"Showing {len(result['results'])} individual event-page candidates matched to your interests and date range.")
         if result.get("ai_available"):
             st.caption("OpenRouter Gemma added relevance scores and explanations. Dates and eligibility still need official-page verification.")
         elif use_ai and result.get("ai_message"):
             st.warning(result["ai_message"])
         else:
-            st.caption("Using the built-in free local ranker; OpenRouter is optional.")
+            st.caption("Using the built-in local relevance ranker; OpenRouter is optional.")
 
         for item in result["results"]:
             st.markdown(f"### {item['name']}")
