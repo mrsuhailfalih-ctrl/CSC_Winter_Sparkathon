@@ -1,48 +1,11 @@
 import hashlib
-import re
 
 import streamlit as st
 
 from utils.eligibility import parse_age_bounds, verify_age_rule
 from utils.live_search import find_hackathons
 from utils.openrouter_ai import analyze_with_openrouter
-
-
-def _words(text: str) -> set[str]:
-    ignored = {"and", "the", "for", "with", "from", "that", "this", "any", "are", "you", "your", "want", "looking", "hackathon", "hackathons", "event", "events"}
-    return {word for word in re.findall(r"[a-z0-9]+", text.lower()) if (len(word) >= 3 or word == "ai") and word not in ignored}
-
-
-def _has_topic_match(item: dict, interests: str) -> bool:
-    terms = _words(interests)
-    if not terms:
-        return True
-    evidence = f"{item.get('name', '')} {item.get('snippet', '')}".lower()
-    evidence_terms = _words(evidence)
-    if "ai" in terms and ("artificial" in evidence_terms or "intelligence" in evidence_terms):
-        evidence_terms.add("ai")
-    # Interests are alternatives (e.g. AI OR Python), not a requirement that every
-    # search result snippet repeat every entered keyword.
-    return bool(terms & evidence_terms)
-
-
-def _preference_status(item: dict, details: str) -> list[str]:
-    evidence = f"{item.get('name', '')} {item.get('snippet', '')}".lower()
-    requested = _words(details)
-    status = []
-    if requested & {"online", "virtual", "remote"}:
-        status.append("Online/virtual: mentioned" if re.search(r"\b(online|virtual|remote|remote-first|anywhere|worldwide)\b", evidence) else "Online/virtual: not confirmed")
-    if "free" in requested:
-        status.append("Free: mentioned" if re.search(r"\b(free|no cost|without charge|free to enter|free entry)\b", evidence) else "Free: not confirmed")
-    return status
-
-
-def _split_candidates(candidates: list[dict], interests: str) -> tuple[list[dict], list[dict]]:
-    relevant = [item for item in candidates if _has_topic_match(item, interests)]
-    # Never label unknown dates as in-range; keep them visible as unverified possibilities.
-    confirmed = [item for item in relevant if item.get("date_fit") is True]
-    possible = [item for item in relevant if item.get("date_fit") is None]
-    return confirmed, possible
+from utils.result_filtering import filter_event_candidates, preference_evidence
 
 
 st.set_page_config(page_title="Hackathon Finder AI", page_icon="🔎", layout="wide")
@@ -73,38 +36,38 @@ if st.button("Search for hackathons", type="primary", use_container_width=True):
     elif start_date > end_date:
         st.error("The start date must be on or before the latest date.")
     else:
-        with st.spinner("Searching event pages and filtering directories, guides, duplicates, and past listings..."):
+        with st.spinner("Searching and checking event dates, relevance, and individual event pages..."):
             result = find_hackathons(interests, details, start_date, end_date, use_ollama=False)
-            # Exclude only events explicitly dated outside the requested period. Results
-            # without date evidence are shown separately, never presented as confirmed.
-            candidates = [item for item in result.get("results", []) if item.get("date_fit") is not False]
-            confirmed, possible = _split_candidates(candidates, interests)
+            confirmed, possible, filter_diagnostics = filter_event_candidates(
+                result.get("results", []), interests, start_date, end_date
+            )
             result["confirmed_results"] = confirmed
             result["possible_results"] = possible
-            if use_ai and (confirmed or possible):
-                to_score = confirmed + possible
+            result.setdefault("search_diagnostics", {})["result_filtering"] = filter_diagnostics
+            ranked = confirmed + possible
+            if use_ai and ranked:
                 with st.spinner("Scoring results with OpenRouter..."):
                     ai = analyze_with_openrouter(
-                        to_score,
+                        ranked,
                         f"Interests: {interests}\nAdditional details: {details}",
                         start_date,
                         end_date,
                     )
                 result["ai_available"] = ai["available"]
                 result["ai_message"] = ai["message"]
-                for item in to_score:
+                for item in ranked:
                     annotation = ai["annotations"].get(item["id"])
                     if annotation:
                         item["ai_score"] = annotation["score"]
                         item["reason"] = annotation["reason"]
-                confirmed.sort(key=lambda item: -item.get("ai_score", item.get("local_relevance", 0)))
-                possible.sort(key=lambda item: -item.get("ai_score", item.get("local_relevance", 0)))
             else:
                 result["ai_available"] = False
                 result["ai_message"] = "AI ranking is off; using local ranking."
-            if not confirmed and not possible:
-                result["message"] = "No relevant candidates were found. Try broader interests or a wider date range."
+            confirmed.sort(key=lambda item: -item.get("ai_score", item.get("local_relevance", 0)))
+            possible.sort(key=lambda item: -item.get("ai_score", item.get("local_relevance", 0)))
             result["results"] = confirmed + possible
+            if not result["results"]:
+                result["message"] = "No current individual hackathon pages matched the topic and selected dates. Known out-of-range events and directory/course pages were filtered out. Try broadening the date range."
             st.session_state["live_search_result"] = result
 
 result = st.session_state.get("live_search_result")
@@ -133,7 +96,7 @@ if result:
                 st.caption(f"AI relevance: {item['ai_score']}/100")
             st.write(item.get("reason", "Potential event page; verify details."))
             st.caption(item.get("date_match", "Date not confirmed"))
-            for note in _preference_status(item, details):
+            for note in preference_evidence(item, details):
                 st.caption(note)
             if item.get("snippet"):
                 st.write(item["snippet"])
@@ -185,6 +148,6 @@ if result:
                 render_event(item)
         if possible:
             st.subheader("Possible matches — dates need verification")
-            st.warning("These results mention your interests but the search snippet does not confirm dates in your selected period. Check each event's official page before treating it as a match.")
+            st.warning("These are specific hackathon event pages matching your topic, but search snippets don’t establish that the event falls within your selected dates. Check the organizer’s page.")
             for item in possible:
                 render_event(item)
