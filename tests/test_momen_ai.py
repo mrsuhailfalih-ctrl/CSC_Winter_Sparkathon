@@ -1,37 +1,58 @@
 import json
 import unittest
+from datetime import date
 from unittest.mock import Mock, patch
 
-from utils.momen_ai import _replace_prompt, rank_events_with_momen
+from utils.momen_ai import search_events_with_momen
 
 
-class MomenIntegrationTests(unittest.TestCase):
+class MomenWebSearchTests(unittest.TestCase):
     @patch.dict("os.environ", {}, clear=True)
-    def test_missing_settings_falls_back_without_request(self):
-        result = rank_events_with_momen([{"name": "Event", "url": "https://devpost.com/hackathons/event"}])
-        self.assertFalse(result["available"])
-        self.assertEqual(result["rankings"], {})
-
-    def test_prompt_substitution_supports_nested_variables(self):
-        result = _replace_prompt({"input": {"message": "{{PROMPT}}"}}, "hello")
-        self.assertEqual(result, {"input": {"message": "hello"}})
+    def test_missing_configuration_returns_no_events(self):
+        result = search_events_with_momen("AI", "", date(2027, 3, 1), date(2027, 3, 31))
+        self.assertEqual(result["results"], [])
+        self.assertTrue(result["error"])
 
     @patch.dict("os.environ", {
         "MOMEN_GRAPHQL_URL": "https://example.momen.app/api/graphql",
         "MOMEN_JWT": "test-token",
-        "MOMEN_AI_MUTATION": "mutation Rank($prompt: String!) { rank(prompt: $prompt) }",
+        "MOMEN_AI_MUTATION": "mutation Search($prompt: String!) { search(prompt: $prompt) }",
         "MOMEN_AI_VARIABLES_JSON": '{"prompt":"{{PROMPT}}"}',
     }, clear=True)
     @patch("utils.momen_ai.requests.post")
-    def test_accepts_only_rankings_for_supplied_urls(self, post):
-        event_url = "https://devpost.com/hackathons/ai-event"
-        output = {"rankings": [{"url": event_url, "score": 88, "reason": "AI topic matches"}, {"url": "https://bad.example/x", "score": 100}]}
-        post.return_value = Mock(status_code=200)
-        post.return_value.json.return_value = {"data": {"rank": json.dumps(output)}}
-        post.return_value.raise_for_status.return_value = None
-        result = rank_events_with_momen([{"name": "AI Event", "url": event_url}])
-        self.assertTrue(result["available"])
-        self.assertEqual(result["rankings"], {event_url: {"score": 88, "reason": "AI topic matches"}})
+    @patch("utils.momen_ai._verify_candidate")
+    def test_only_allowlisted_urls_are_queried_and_verified(self, verify, post):
+        allowed = "https://devpost.com/hackathons/ai-robotics-2027"
+        reply = {"events": [{"url": allowed}, {"url": "https://random-blog.example/hackathon"}]}
+        response = Mock()
+        response.json.return_value = {"data": {"search": json.dumps(reply)}}
+        response.raise_for_status.return_value = None
+        post.return_value = response
+        verify.return_value = {
+            "name": "AI Robotics Hackathon", "url": allowed, "source_platform": "Devpost",
+            "snippet": "AI and robotics", "start_date": date(2027, 3, 10), "end_date": None,
+            "location": "", "date_verified": True,
+        }
+        result = search_events_with_momen("AI", "", date(2027, 3, 1), date(2027, 3, 31))
+        self.assertEqual(len(result["results"]), 1)
+        self.assertEqual(result["results"][0]["url"], allowed)
+        verify.assert_called_once_with({"url": allowed})
+
+    @patch.dict("os.environ", {
+        "MOMEN_GRAPHQL_URL": "https://example.momen.app/api/graphql",
+        "MOMEN_JWT": "test-token",
+        "MOMEN_AI_MUTATION": "mutation Search($prompt: String!) { search(prompt: $prompt) }",
+        "MOMEN_AI_VARIABLES_JSON": '{"prompt":"{{PROMPT}}"}',
+    }, clear=True)
+    @patch("utils.momen_ai.requests.post")
+    def test_invalid_agent_output_is_handled(self, post):
+        response = Mock()
+        response.json.return_value = {"data": {"search": "not-json"}}
+        response.raise_for_status.return_value = None
+        post.return_value = response
+        result = search_events_with_momen("AI", "", date(2027, 3, 1), date(2027, 3, 31))
+        self.assertTrue(result["error"])
+        self.assertEqual(result["results"], [])
 
 
 if __name__ == "__main__":
