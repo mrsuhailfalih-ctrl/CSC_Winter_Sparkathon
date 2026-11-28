@@ -16,6 +16,11 @@ MONTH_DATE = re.compile(
     rf"(?:\s*(?:-|–|to)\s*(\d{{1,2}})(?:st|nd|rd|th)?)?[,]?\s+(20\d{{2}})\b",
     re.I,
 )
+CROSS_MONTH_RANGE = re.compile(
+    rf"\b({MONTH_PATTERN})\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?\s*(?:-|–|to)\s*"
+    rf"({MONTH_PATTERN})\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?[,]?\s+(20\d{{2}})\b",
+    re.I,
+)
 ISO_DATE = re.compile(r"\b(20\d{2})-(\d{1,2})-(\d{1,2})\b")
 
 COLLECTION_TITLE = re.compile(
@@ -30,9 +35,6 @@ STRONG_ROUNDUP = re.compile(
     r"filterable\s+by|filter\s+by\s+(?:deadline|format|region)|\d+\s+online\s+and\s+virtual\s+hackathons?|"
     r"hackathons?\s+in\s+\d+\s+cities|(?:bond's|our|my)\s+picks|discover\s+hackathons?\s+on\s+[\w.-]+)", re.I,
 )
-
-# Search-engine dates commonly describe publication or registration deadlines,
-# not when the event itself takes place. Do not use them to satisfy the date filter.
 NON_EVENT_DATE_CONTEXT = re.compile(
     r"\b(?:published|posted|updated|modified|last\s+crawled|registration\s+deadline|"
     r"application\s+deadline|applications?\s+close|register\s+by|apply\s+by|deadline)\b", re.I,
@@ -48,10 +50,24 @@ def _nearby_context(text: str, start: int, end: int, radius: int = 100) -> str:
 
 
 def _event_date_ranges(text: str) -> list[tuple[date, date]]:
-    """Extract year-qualified dates only when nearby text links them to an event schedule."""
     candidates: list[tuple[date, date]] = []
     occupied: list[tuple[int, int]] = []
+    for match in CROSS_MONTH_RANGE.finditer(text):
+        context = _nearby_context(text, *match.span())
+        if NON_EVENT_DATE_CONTEXT.search(context) or not EVENT_DATE_CONTEXT.search(context):
+            continue
+        first_month, first_day, last_month, last_day, year = match.groups()
+        try:
+            first = date(int(year), MONTHS[first_month.lower().rstrip(".")], int(first_day))
+            last = date(int(year), MONTHS[last_month.lower().rstrip(".")], int(last_day))
+        except (KeyError, ValueError):
+            continue
+        candidates.append((first, last))
+        occupied.append(match.span())
+
     for match in MONTH_DATE.finditer(text):
+        if any(a <= match.start() < b for a, b in occupied):
+            continue
         context = _nearby_context(text, *match.span())
         if NON_EVENT_DATE_CONTEXT.search(context) or not EVENT_DATE_CONTEXT.search(context):
             continue
@@ -79,7 +95,6 @@ def _event_date_ranges(text: str) -> list[tuple[date, date]]:
 
 
 def extract_explicit_dates(text: str) -> list[date]:
-    """Compatibility helper: return dates with explicit years, irrespective of context."""
     found: set[date] = set()
     for match in MONTH_DATE.finditer(text):
         month, day, last_day, year = match.groups()
@@ -111,12 +126,7 @@ def is_unnecessary_search_result(item: dict[str, Any]) -> bool:
 def filter_search_results(
     results: list[dict[str, Any]], start: date | None = None, end: date | None = None,
 ) -> list[dict[str, Any]]:
-    """Filter collections and (strictly) keep only date-evidenced events in range.
-
-    Only the result title/snippet are inspected: result URLs are never fetched. Dates
-    from Serper's `date` field are ignored because those are indexing/publication dates.
-    Results with no unambiguous event-schedule date are omitted when a range is selected.
-    """
+    """Remove obvious roundups and confirmed out-of-range dates; retain unknown dates."""
     output: list[dict[str, Any]] = []
     for item in results:
         if not isinstance(item, dict) or is_unnecessary_search_result(item):
@@ -125,18 +135,36 @@ def filter_search_results(
         if start is not None and end is not None:
             if start > end:
                 raise ValueError("The start date must be on or before the latest date.")
+            if "event_start_date" in row or "event_end_date" in row:
+                explicit = []
+                for field in ("event_start_date", "event_end_date"):
+                    value = row.get(field)
+                    try:
+                        if value:
+                            explicit.append(date.fromisoformat(str(value)[:10]))
+                    except ValueError:
+                        continue
+                if explicit:
+                    first, last = min(explicit), max(explicit)
+                    if last < start or first > end:
+                        continue
+                    row["date_verification"] = {"status": "model_date_match", "dates": [d.isoformat() for d in explicit], "note": "Model-reported dates; verify on organizer page."}
+                    output.append(row)
+                    continue
+
             snippet = str(row.get("snippet", row.get("description", "")))
             ranges = _event_date_ranges(snippet)
-            if not ranges:
+            matching = [(first, last) for first, last in ranges if first <= end and last >= start]
+            if ranges and not matching:
                 continue
-            # Fail closed when snippets contain conflicting schedule dates. This avoids
-            # admitting stale editions just because another unrelated date matches.
-            if any(last < start or first > end for first, last in ranges):
-                continue
-            row["date_verification"] = {
-                "status": "snippet_match",
-                "dates": sorted({value.isoformat() for first, last in ranges for value in (first, last)}),
-                "note": "An event-related date in the search snippet overlaps the selected range; verify on organizer page.",
-            }
+            if matching:
+                row["date_verification"] = {
+                    "status": "snippet_match",
+                    "dates": sorted({value.isoformat() for first, last in matching for value in (first, last)}),
+                    "note": "Event-schedule date inferred from snippet; verify with organizer.",
+                }
+            else:
+                # Lenient mode: keep candidates lacking date evidence, but clearly mark them.
+                row["date_verification"] = {"status": "unverified", "dates": [], "note": "No reliable event schedule date in search result."}
         output.append(row)
     return output
