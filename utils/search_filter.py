@@ -1,68 +1,129 @@
 from __future__ import annotations
 
 import re
+from datetime import date, datetime
+from html.parser import HTMLParser
 from typing import Any
 
-# Titles that strongly indicate a collection, directory, calendar, or broad
-# search category rather than an individual event.
+import requests
+
+MONTHS = {
+    "jan": 1, "january": 1, "feb": 2, "february": 2,
+    "mar": 3, "march": 3, "apr": 4, "april": 4,
+    "may": 5, "jun": 6, "june": 6, "jul": 7, "july": 7,
+    "aug": 8, "august": 8, "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10, "nov": 11, "november": 11,
+    "dec": 12, "december": 12,
+}
+
 COLLECTION_TITLE = re.compile(
     r"\b(?:list\s+of\s+\d|\d+\s*\+?\s+(?:open\s+)?(?:online\s+)?hackathons?|"
-    r"every\s+hackathon(?:s)?\s+in\s+20\d{2}|"
-    r"(?:online|virtual|remote|free|global|upcoming)\s+hackathons?\b|"
-    r"hackathons?\s*[—–-]\s*(?:virtual|online|remote)|"
-    r"(?:free\s+)?online\s+hackathon\s+events|"
-    r"(?:discover|explore|browse)\s+hackathons?\b|"
-    r"upcoming\s+.*hackathons?.*\b\d+\s+cities\b|"
-    r"hackathons?\s+in\s+\d+\s+cities|"
-    r"global\s+hackathons?\s+20\d{4}|"
-    r"all\s+hackathons?\b|hackathons?\s+made\s+easy|"
-    r"hackathons?\s+and\s+challenges)\b",
-    re.IGNORECASE,
+    r"every\s+hackathon(?:s)?\s+in\s+20\d{2}|(?:online|virtual|remote|free|global|upcoming)\s+hackathons?\b|"
+    r"hackathons?\s*[—–-]\s*(?:virtual|online|remote)|(?:free\s+)?online\s+hackathon\s+events|"
+    r"(?:discover|explore|browse)\s+hackathons?\b|hackathons?\s+in\s+\d+\s+cities|"
+    r"global\s+hackathons?\s+20\d{2}|all\s+hackathons?\b|hackathons?\s+made\s+easy)",
+    re.I,
 )
 
-# Explicit roundup/list cues are not overridden just because the roundup
-# mentions deadlines, prizes, or event formats.
 STRONG_ROUNDUP = re.compile(
-    r"\b(?:list\s+of\s+\d|\d{2,}\s+(?:open\s+)?hackathons?|"
-    r"every\s+hackathon(?:s)?\s+in\s+20\d{2}|"
-    r"every\s+hackathon\s+happening|"
-    r"filterable\s+by|filter\s+by\s+(?:deadline|format|region)|"
-    r"\d+\s+online\s+and\s+virtual\s+hackathons?|"
-    r"hackathons?\s+in\s+\d+\s+cities|"
-    r"(?:bond's|our|my)\s+picks|"
-    r"including\s+online\s+and\s+virtual\s+events|"
-    r"discover\s+hackathons?\s+on\s+[\w.-]+)",
-    re.IGNORECASE,
+    r"\b(?:list\s+of\s+\d|\d{2,}\s+(?:open\s+)?hackathons?|every\s+hackathon(?:s)?\s+(?:in|happening)|"
+    r"filterable\s+by|filter\s+by\s+(?:deadline|format|region)|\d+\s+online\s+and\s+virtual\s+hackathons?|"
+    r"hackathons?\s+in\s+\d+\s+cities|(?:bond's|our|my)\s+picks|discover\s+hackathons?\s+on\s+[\w.-]+)",
+    re.I,
 )
 
-EVENT_DETAIL_PATTERNS = (
-    re.compile(r"\b\d{1,3}\s*[- ]?hour\b", re.I),
-    re.compile(r"\b(?:teams?\s+of\s+\d|teams?\s+(?:will|can|build)|build(?:ers)?\s+(?:will|can)\s+make)\b", re.I),
-    re.compile(r"\b(?:participants?|builders?)\s+aged?\s+\d{1,2}\s*[-–to]+\s*\d{1,2}\b", re.I),
-    re.compile(r"\b(?:deadline|finals?|kickoff|starts?\s+on|takes?\s+place)\s*:?\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{4}-\d{2}-\d{2})", re.I),
-    re.compile(r"\$\s?\d[\d,]*(?:\.\d{2})?\s*(?:in\s+)?(?:prizes?|prize\s+pool)?", re.I),
-    re.compile(r"\b(?:register|registration|apply|applications?\s+open)\b", re.I),
-    re.compile(r"\b(?:finals?|final\s+round)\s+(?:in|at)\s+[A-Z]", re.I),
+MONTH_DATE = re.compile(
+    r"\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|"
+    r"Aug(?:ust)?|Sep(?:tember)?|Sept(?:ember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?"
+    r"\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s*(?:-|–|to)\s*(\d{1,2})(?:st|nd|rd|th)?)?,?\s+(20\d{2})\b",
+    re.I,
 )
+ISO_DATE = re.compile(r"\b(20\d{2})-(\d{1,2})-(\d{1,2})\b")
+
+
+class _TextParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.text: list[str] = []
+
+    def handle_data(self, data: str) -> None:
+        value = re.sub(r"\s+", " ", data).strip()
+        if value:
+            self.text.append(value)
+
+
+def extract_explicit_dates(text: str) -> list[date]:
+    """Extract only explicit, year-qualified dates; never interpret publication dates."""
+    found: set[date] = set()
+    for match in MONTH_DATE.finditer(text):
+        month_name, start_day, end_day, year = match.groups()
+        try:
+            found.add(date(int(year), MONTHS[month_name.lower().rstrip(".")], int(start_day)))
+            if end_day:
+                found.add(date(int(year), MONTHS[month_name.lower().rstrip(".")], int(end_day)))
+        except (KeyError, ValueError):
+            pass
+    for match in ISO_DATE.finditer(text):
+        try:
+            found.add(date(int(match.group(1)), int(match.group(2)), int(match.group(3))))
+        except ValueError:
+            pass
+    return sorted(found)
+
+
+def verify_source_dates(url: str, start: date, end: date) -> dict[str, Any]:
+    """Fetch a result's source page and look for explicit event dates in its HTML/JSON-LD."""
+    if not isinstance(url, str) or not url.lower().startswith("https://"):
+        return {"status": "unverified", "dates": [], "reason": "No HTTPS source URL"}
+    try:
+        response = requests.get(
+            url,
+            headers={"User-Agent": "HackathonFinder/1.0 (date verification; contact repository owner)"},
+            timeout=(4, 10),
+            allow_redirects=True,
+        )
+        response.raise_for_status()
+        parser = _TextParser()
+        parser.feed(response.text[:2_000_000])
+        dates = extract_explicit_dates(" ".join(parser.text) + " " + response.text)
+        in_range = [value for value in dates if start <= value <= end]
+        if in_range:
+            return {"status": "verified", "dates": in_range, "reason": "Explicit dates found on source page"}
+        if dates:
+            return {"status": "outside_range", "dates": dates, "reason": "Source page dates are outside the requested range"}
+        return {"status": "unverified", "dates": [], "reason": "No explicit year-qualified event dates found on source page"}
+    except requests.RequestException:
+        return {"status": "unverified", "dates": [], "reason": "Source page could not be fetched"}
 
 
 def is_unnecessary_search_result(item: dict[str, Any]) -> bool:
-    """Return True for broad directories/roundups, but retain individual events."""
     title = str(item.get("title", ""))
     snippet = str(item.get("snippet", item.get("description", "")))
     combined = f"{title}. {snippet}"
-
     if STRONG_ROUNDUP.search(combined):
         return True
     if not COLLECTION_TITLE.search(title):
         return False
-
-    # Some real events use generic platform titles (for example, "All Hackathons").
-    # Keep those only when the snippet contains multiple concrete event details.
-    specific_details = sum(bool(pattern.search(snippet)) for pattern in EVENT_DETAIL_PATTERNS)
-    return specific_details < 2
+    event_detail = re.search(r"\b(?:teams?\s+of|deadline|finals?|register|registration|prize|participants?|aged?\s+\d)", snippet, re.I)
+    return not bool(event_detail)
 
 
-def filter_search_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Remove obvious directory/listicle results while preserving Serper fields."""
-    return [item for item in results if isinstance(item, dict) and not is_unnecessary_search_result(item)]
+def filter_search_results(results: list[dict[str, Any]], start: date | None = None, end: date | None = None) -> list[dict[str, Any]]:
+    """Hide broad pages and, when a range is supplied, hide results outside it.
+
+    Unknown dates are retained and clearly marked; snippets/search-index `date` fields
+    are never used as proof of event timing. Confirmed source-page dates outside the
+    range are removed. Source verification failures remain unverified rather than discarded.
+    """
+    filtered: list[dict[str, Any]] = []
+    for item in results:
+        if not isinstance(item, dict) or is_unnecessary_search_result(item):
+            continue
+        row = dict(item)
+        if start is not None and end is not None:
+            verification = verify_source_dates(str(row.get("link", "")), start, end)
+            row["date_verification"] = verification
+            if verification["status"] == "outside_range":
+                continue
+        filtered.append(row)
+    return filtered
