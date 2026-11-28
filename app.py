@@ -8,22 +8,18 @@ from utils.serper_search import search_with_serper, serper_is_configured
 st.set_page_config(page_title="Hackathon Finder", page_icon="🔎", layout="wide")
 st.title("🔎 Hackathon Finder")
 st.write("Search the web for hackathons using Serper's Google Search API.")
-st.caption("Broad hackathon directories and roundup pages are hidden. Search result dates can be stale or refer to publication dates, so confirm event dates and deadlines with organizers.")
+st.caption("With a date range selected, results without clear event schedule dates are hidden. Search snippets are still not authoritative; confirm schedules and eligibility with organizers.")
 
 left, right = st.columns(2)
 with left:
     interests = st.text_input("Interests / technologies", placeholder="AI, Python, climate, social good")
     details = st.text_area("Other preferences", placeholder="Free, beginner-friendly", height=100)
-    age = st.number_input("Your age", min_value=5, max_value=100, value=18, step=1, help="Used to search for events that may fit your age. Always confirm eligibility with the organizer.")
+    age = st.number_input("Your age", min_value=5, max_value=100, value=18, step=1, help="Used to search for events that may fit your age. Confirm eligibility with organizers.")
 with right:
     start_date = st.date_input("Earliest event date", key="period_start")
     end_date = st.date_input("Latest event date", key="period_end")
     event_format = st.selectbox("Hackathon format", ("Any", "Online", "In-person"), index=0)
-    location = st.text_input(
-        "Location / vicinity",
-        placeholder="City, state/province, or country",
-        help="Add a location for in-person events, or optionally narrow an Any search. Leave blank for online events or a worldwide search.",
-    )
+    location = st.text_input("Location / vicinity", placeholder="City, state/province, or country")
 
 if not serper_is_configured():
     st.warning("Serper search is not configured. Set SERPER_API_KEY in your environment or Streamlit secrets to enable search.")
@@ -34,17 +30,12 @@ if st.button("Find hackathons", type="primary", use_container_width=True):
     elif start_date > end_date:
         st.error("The earliest date must be on or before the latest date.")
     elif event_format == "In-person" and not location.strip():
-        st.warning("Enter a city, state/province, or country for in-person events.")
+        st.warning("Enter a location for in-person events.")
     else:
         with st.spinner("Searching the web with Serper..."):
             st.session_state["serper_search_result"] = search_with_serper(
-                interests,
-                details,
-                start_date,
-                end_date,
-                age=int(age),
-                event_format=event_format,
-                location=location,
+                interests, details, start_date, end_date,
+                age=int(age), event_format=event_format, location=location,
             )
 
 result = st.session_state.get("serper_search_result")
@@ -53,30 +44,28 @@ if result:
         st.error(result["error"])
     else:
         raw_results = result.get("results", [])
-        events = filter_search_results(raw_results)
-        hidden_count = len(raw_results) - len(events)
+        events = filter_search_results(raw_results, start_date, end_date)
+        removed = len(raw_results) - len(events)
         st.caption(f'Search query: {result.get("query", "")}.')
-        st.info("Dates shown in search snippets are not verified event dates. Check the organizer's page for the current schedule, deadline, and eligibility.")
+        st.info("Only results with event-related, year-specific dates in the selected window are shown. Dates are inferred from search snippets, not independently verified. Open the source page before relying on them.")
         if events:
-            st.success(f"Showing {len(events)} result(s).")
-            if hidden_count:
-                st.caption(f"Filtered out {hidden_count} broad directory or roundup result(s).")
+            st.success(f"Showing {len(events)} result(s) matching the date range.")
+            if removed:
+                st.caption(f"Omitted {removed} results because they were broad listings, lacked clear event dates, or had dates outside the selected range.")
             for index, item in enumerate(events, start=1):
-                title = item.get("title") or "Untitled result"
-                link = item.get("link")
                 with st.container(border=True):
-                    st.markdown(f"### {index}. {title}")
-                    # Serper's `date` is usually the indexed/published date, not the event schedule.
+                    st.markdown(f"### {index}. {item.get('title') or 'Untitled result'}")
+                    dates = item.get("date_verification", {}).get("dates", [])
+                    if dates:
+                        st.caption("Date evidence: " + ", ".join(dates) + " (verify with organizer)")
                     if item.get("snippet"):
                         st.write(item["snippet"])
-                    if link:
-                        st.link_button("Open event/source page and verify dates", str(link))
-                    elif item.get("displayLink"):
-                        st.write(item["displayLink"])
+                    if item.get("link"):
+                        st.link_button("Open source page and verify dates", str(item["link"]))
         elif raw_results:
-            st.info("Serper returned results, but they all looked like broad hackathon directories or roundups. Try a more specific query such as an event topic, age group, or location.")
+            st.info("No results had clear event-date evidence inside the selected range. Try adjusting the dates or use a more specific query. No search-result publication dates were treated as event dates.")
         else:
             st.info("Serper returned no organic search results for this query.")
 
 st.divider()
-st.caption("Keep your Serper API key private. Search terms and the age/location/format preferences you enter are sent to Serper to perform the web search. Eligibility and event schedules are not independently verified.")
+st.caption("Keep your Serper API key private. Search terms and age/location/format preferences are sent to Serper. Event schedules and eligibility are not independently verified.")
