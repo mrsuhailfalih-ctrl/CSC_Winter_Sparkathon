@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import streamlit as st
 
+from utils.search_filter import filter_search_results
 from utils.serper_search import search_with_serper, serper_is_configured
 
 st.set_page_config(page_title="Hackathon Finder", page_icon="🔎", layout="wide")
 st.title("🔎 Hackathon Finder")
 st.write("Search the web for hackathons using Serper's Google Search API.")
-st.caption("Search results are displayed directly from Serper without post-search topic, date, event-type, or domain filtering. Verify details on the source pages.")
+st.caption("Broad hackathon directories and roundup pages are hidden. Search results are best-effort; verify details on source pages.")
 
 left, right = st.columns(2)
 with left:
@@ -36,13 +37,15 @@ if result:
     if result.get("error"):
         st.error(result["error"])
     else:
-        events = result.get("results", [])
-        st.caption(f'Search query: {result.get("query", "")}. Results are unfiltered Serper organic results.')
+        raw_results = result.get("results", [])
+        events = filter_search_results(raw_results)
+        hidden_count = len(raw_results) - len(events)
+        st.caption(f'Search query: {result.get("query", "")}.')
         if events:
-            st.success(f"Serper returned {len(events)} search result(s).")
+            st.success(f"Showing {len(events)} result(s).")
+            if hidden_count:
+                st.caption(f"Filtered out {hidden_count} broad directory or roundup result(s).")
             for index, item in enumerate(events, start=1):
-                if not isinstance(item, dict):
-                    continue
                 title = item.get("title") or "Untitled result"
                 link = item.get("link")
                 with st.container(border=True):
@@ -55,6 +58,8 @@ if result:
                         st.link_button("Open search result", str(link))
                     elif item.get("displayLink"):
                         st.write(item["displayLink"])
+        elif raw_results:
+            st.info("Serper returned results, but they all looked like broad hackathon directories or roundups. Try a more specific query such as an event topic, age group, or location.")
         else:
             st.info("Serper returned no organic search results for this query.")
 
