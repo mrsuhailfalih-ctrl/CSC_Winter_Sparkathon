@@ -13,31 +13,24 @@ MONTHS = {
     "nov": 11, "november": 11, "dec": 12, "december": 12,
 }
 MONTH_PATTERN = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
-DATE_RE = re.compile(
-    rf"\b({MONTH_PATTERN})\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?"
-    rf"(?:\s*(?:-|–|to)\s*(\d{{1,2}})(?:st|nd|rd|th)?)?[,]?\s+(20\d{{2}})\b",
-    re.I,
-)
+DATE_RE = re.compile(rf"\b({MONTH_PATTERN})\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?(?:\s*(?:-|–|to)\s*(\d{{1,2}})(?:st|nd|rd|th)?)?[,]?\s+(20\d{{2}})\b", re.I)
 ISO_DATE_RE = re.compile(r"\b(20\d{2})-(0?[1-9]|1[0-2])-(0?[1-9]|[12]\d|3[01])\b")
 YEAR_MONTH_RE = re.compile(rf"\b({MONTH_PATTERN})\.?\s+(20\d{{2}})\b", re.I)
-GENERIC_TITLES = re.compile(
-    r"\b(directory|find upcoming|upcoming hackathons?|browse events|boot\s?camp|"
-    r"pre-?register|registration page|hackathons? and challenges|competitions, quizzes, hackathons)\b",
-    re.I,
-)
-GENERIC_SLUGS = {"", "hackathons", "events", "search", "browse", "upcoming", "all", "competitions"}
-KNOWN_DIRECTORY_HOSTS = {"dev.events", "hack4hack.com", "aiwhatson.com", "mlh.io"}
-EVENT_ACTIONS = re.compile(r"\b(register|registration|apply|applications?|prizes?|teams?|submit|challenge)\b", re.I)
+GENERIC_TITLES = re.compile(r"\b(directory|browse events|hackathon guide|upcoming hackathons?|hackathons? list|boot\s?camp|tutorial|how to build)\b", re.I)
+EVENT_WORDS = re.compile(r"\b(hack(?:-a-)?thon|buildathon|coding challenge|innovation challenge|competition|sprint|jam|makeathon)\b", re.I)
+EVENT_EVIDENCE = re.compile(r"\b(register|registration|apply|applications?|prizes?|teams?|submit|join|deadline|build|challenge|competition)\b", re.I)
+ONLINE_WORDS = re.compile(r"\b(online|virtual|remote|remote-first|anywhere|worldwide)\b", re.I)
+IN_PERSON_WORDS = re.compile(r"\b(in[ -]?person|onsite|on[ -]site|physical venue|at the venue|held in|located in)\b", re.I)
 
 
 def extract_event_dates(text: str) -> list[date]:
-    """Extract explicit event dates, including abbreviated months and date ranges."""
+    """Extract explicit dates from a title/snippet, tolerating common formats."""
     found: set[date] = set()
     covered_spans: list[tuple[int, int]] = []
     for match in DATE_RE.finditer(text):
         month, first_day, last_day, year = match.groups()
-        month_number = MONTHS[month.lower().rstrip(".")]
         try:
+            month_number = MONTHS[month.lower().rstrip(".")]
             found.add(date(int(year), month_number, int(first_day)))
             if last_day:
                 found.add(date(int(year), month_number, int(last_day)))
@@ -51,10 +44,12 @@ def extract_event_dates(text: str) -> list[date]:
         except ValueError:
             continue
     for match in YEAR_MONTH_RE.finditer(text):
-        if any(start <= match.start() < end for start, end in covered_spans):
+        if any(begin <= match.start() < finish for begin, finish in covered_spans):
             continue
-        month_number = MONTHS[match.group(1).lower().rstrip(".")]
-        found.add(date(int(match.group(2)), month_number, 1))
+        try:
+            found.add(date(int(match.group(2)), MONTHS[match.group(1).lower().rstrip(".")], 1))
+        except ValueError:
+            continue
     return sorted(found)
 
 
@@ -64,35 +59,28 @@ def _topic_words(text: str) -> set[str]:
 
 
 def _is_individual_hackathon(item: dict[str, Any]) -> bool:
+    """Reject obvious guides/directories, but keep plausible event pages generously."""
     title = str(item.get("name", "")).strip()
     snippet = str(item.get("snippet", ""))
-    title_lower = title.lower()
-    if GENERIC_TITLES.search(title):
+    if not title or GENERIC_TITLES.search(title):
         return False
-
     try:
         parsed = urlsplit(str(item.get("url", "")))
-        host = (parsed.hostname or "").lower().removeprefix("www.")
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+            return False
         path_parts = [part for part in parsed.path.lower().split("/") if part]
     except ValueError:
-        host, path_parts = "", []
-    slug = path_parts[-1] if path_parts else ""
-
-    # Reject known search directories at their root/category routes, but don't
-    # classify an individual event as generic just because its title says
-    # "hackathon for ..." or the provider omitted that word from its title.
-    if host in KNOWN_DIRECTORY_HOSTS and (not path_parts or slug in GENERIC_SLUGS):
-        return False
-    if slug in GENERIC_SLUGS and not re.search(r"\bhackathon\b", title_lower):
         return False
 
-    has_event_title = bool(re.search(r"\bhack(?:-a-)?thon\b", title_lower))
-    has_event_evidence = bool(re.search(r"\bhack(?:-a-)?thon\b", snippet, re.I) or EVENT_ACTIONS.search(snippet))
-    has_specific_route = bool(path_parts and slug not in GENERIC_SLUGS)
-    # The upstream search cleaner has already checked that results are event-like.
-    # Here we only discard obvious directory/course pages and allow specific
-    # event routes whose search title omitted the word "hackathon".
-    return has_event_title or (has_specific_route and has_event_evidence)
+    title_and_snippet = f"{title} {snippet}"
+    # Serper's query already asks for hackathons; accept event synonyms and specific
+    # event-looking routes even when the snippet itself omits the word hackathon.
+    has_event_language = bool(EVENT_WORDS.search(title_and_snippet))
+    has_event_action = bool(EVENT_EVIDENCE.search(title_and_snippet))
+    has_specific_page = bool(path_parts and path_parts[-1] not in {"hackathons", "events", "search", "browse", "upcoming", "all"})
+    if not path_parts and not has_event_language:
+        return False
+    return has_event_language or (has_specific_page and has_event_action)
 
 
 def _topic_match(item: dict[str, Any], interests: str) -> bool:
@@ -103,43 +91,106 @@ def _topic_match(item: dict[str, Any], interests: str) -> bool:
     available = _topic_words(evidence)
     if "ai" in requested and ("artificial" in available or "intelligence" in available):
         available.add("ai")
-    return bool(requested & available)
+    # Partial term matches are sufficient. If the result has no topic evidence,
+    # retain it as an unconfirmed candidate instead of silently filtering it out.
+    return not available or bool(requested & available)
+
+
+def _age_status(item: dict[str, Any], age: int | None) -> tuple[str, bool]:
+    if age is None:
+        return "Not checked — check official rules", True
+    text = f"{item.get('name', '')} {item.get('snippet', '')}"
+    lower = text.lower()
+    min_match = re.search(r"(?:minimum age(?: is)?|ages?\s*|must be at least\s*|18\+|21\+)\s*(\d{1,2})", lower)
+    max_match = re.search(r"under\s*(\d{1,2})|ages?\s*(\d{1,2})\s*(?:and under|or younger)", lower)
+    minimum = int(min_match.group(1)) if min_match else None
+    maximum = int(max_match.group(1)) if max_match else None
+    if minimum is not None and age < minimum:
+        return f"May not meet stated minimum age ({minimum}+); verify with organizer", False
+    if maximum is not None and age > maximum:
+        return f"May exceed stated age limit (under {maximum}); verify with organizer", False
+    if minimum is not None or maximum is not None:
+        return "Age rule appears compatible in snippet; confirm official rules", True
+    return "Not confirmed — check official age rules and parental-consent requirements", True
+
+
+def _format_status(item: dict[str, Any], requested: str) -> tuple[str, bool]:
+    text = f"{item.get('name', '')} {item.get('snippet', '')}"
+    online = bool(ONLINE_WORDS.search(text))
+    in_person = bool(IN_PERSON_WORDS.search(text))
+    if requested == "Any":
+        if online and in_person:
+            return "Hybrid / multiple formats mentioned", True
+        if online:
+            return "Online/virtual mentioned", True
+        if in_person:
+            return "In-person mentioned", True
+        return "Not confirmed — check official page", True
+    if requested == "Online" and in_person and not online:
+        return "Snippet suggests in-person; verify before applying", False
+    if requested == "In-person" and online and not in_person:
+        return "Snippet suggests online; verify before applying", False
+    if requested == "Online" and online:
+        return "Online/virtual mentioned", True
+    if requested == "In-person" and in_person:
+        return "In-person mentioned", True
+    return "Format not stated — kept as a possible match", True
 
 
 def filter_event_candidates(
-    candidates: list[dict[str, Any]], interests: str, start: date, end: date,
+    candidates: list[dict[str, Any]],
+    interests: str,
+    start: date,
+    end: date,
+    age: int | None = None,
+    event_format: str = "Any",
+    details: str = "",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
-    """Return dated-in-range and date-unknown individual events; exclude known stale dates."""
+    """Keep plausible/unknown candidates; discard only clear mismatches."""
     confirmed: list[dict[str, Any]] = []
     possible: list[dict[str, Any]] = []
-    rejected_titles: list[str] = []
     diagnostics: dict[str, Any] = {
         "input": len(candidates), "not_individual_event": 0,
-        "topic_mismatch": 0, "outside_date_range": 0, "rejected_title_samples": rejected_titles,
+        "topic_mismatch": 0, "outside_date_range": 0,
+        "age_conflict": 0, "format_conflict": 0,
     }
-    for item in candidates:
+    for original in candidates:
+        item = dict(original)
         if not _is_individual_hackathon(item):
             diagnostics["not_individual_event"] += 1
-            if len(rejected_titles) < 10:
-                rejected_titles.append(str(item.get("name", "(untitled)"))[:160])
             continue
-        if not _topic_match(item, interests):
+        if not _topic_match(item, f"{interests} {details}"):
             diagnostics["topic_mismatch"] += 1
             continue
-        text = f"{item.get('name', '')}. {item.get('snippet', '')}"
-        dates = extract_event_dates(text)
+
+        age_status, age_compatible = _age_status(item, age)
+        item["age_status"] = age_status
+        if not age_compatible:
+            diagnostics["age_conflict"] += 1
+            continue
+
+        format_status, format_compatible = _format_status(item, event_format)
+        item["format_status"] = format_status
+        if not format_compatible:
+            diagnostics["format_conflict"] += 1
+            continue
+
+        dates = extract_event_dates(f"{item.get('name', '')}. {item.get('snippet', '')}")
         in_range = [event_date for event_date in dates if start <= event_date <= end]
         if in_range:
             item["date_fit"] = True
-            item["date_match"] = "Date evidence in search result: " + ", ".join(d.isoformat() for d in in_range)
+            item["date_match"] = "Date evidence in range: " + ", ".join(value.isoformat() for value in in_range) + " (verify on official page)"
             confirmed.append(item)
-        elif dates or item.get("date_fit") is False:
+        elif dates:
             diagnostics["outside_date_range"] += 1
-        elif item.get("date_fit") is True:
-            confirmed.append(item)
+            # Search snippets can show registration/deadline dates rather than event
+            # dates. Preserve as a lower-confidence possibility rather than dropping.
+            item["date_fit"] = False
+            item["date_match"] = "Snippet date appears outside requested range; confirm actual event dates"
+            possible.append(item)
         else:
             item["date_fit"] = None
-            item["date_match"] = "Event date not found in search snippet—verify on official page"
+            item["date_match"] = "No event date found in snippet — verify requested dates on official page"
             possible.append(item)
     return confirmed, possible, diagnostics
 
@@ -149,7 +200,7 @@ def preference_evidence(item: dict[str, Any], details: str) -> list[str]:
     requested = _topic_words(details)
     status = []
     if requested & {"online", "virtual", "remote"}:
-        status.append("Online/virtual: mentioned" if re.search(r"\b(online|virtual|remote|remote-first|anywhere|worldwide)\b", evidence) else "Online/virtual: not confirmed")
+        status.append("Online/virtual: mentioned" if ONLINE_WORDS.search(evidence) else "Online/virtual: not confirmed")
     if "free" in requested:
         status.append("Free: mentioned" if re.search(r"\b(free|no cost|without charge|free to enter|free entry)\b", evidence) else "Free: not confirmed")
     return status
