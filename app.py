@@ -6,10 +6,64 @@ from utils.luna_search import luna_is_configured, search_with_luna
 from utils.search_filter import filter_search_results
 from utils.serper_search import search_with_serper, serper_is_configured
 
-st.set_page_config(page_title="Hackathon Finder", page_icon="🔎", layout="wide")
-st.title("🔎 Hackathon Finder")
-st.write("Find hackathons using AI web search, with Serper as a fallback.")
-st.caption("The model's web-search tool must be enabled by its API provider. Event dates and eligibility are not guaranteed; verify on organizer pages.")
+st.set_page_config(page_title="Hackathon Finder", page_icon="⌁", layout="wide")
+
+st.markdown("""
+<style>
+:root { --neon: #7c5cff; --cyan: #43d9ff; --ink: #090b14; --glass: rgba(17, 21, 38, 0.82); }
+html, body, [class*="css"] { font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; }
+.stApp {
+    background:
+        radial-gradient(circle at 12% 12%, rgba(124,92,255,.22), transparent 25rem),
+        radial-gradient(circle at 88% 18%, rgba(67,217,255,.10), transparent 22rem),
+        linear-gradient(145deg, #090b14 0%, #0d1020 55%, #090b14 100%);
+}
+[data-testid="stHeader"] { background: transparent; }
+.block-container { max-width: 1180px; padding-top: 2.2rem; padding-bottom: 3rem; }
+.hero {
+    position: relative; overflow: hidden; border: 1px solid rgba(166,150,255,.24);
+    border-radius: 24px; padding: 2rem 2.2rem; margin-bottom: 1.5rem;
+    background: linear-gradient(120deg, rgba(124,92,255,.18), rgba(67,217,255,.05));
+    box-shadow: 0 18px 60px rgba(0,0,0,.28), inset 0 1px rgba(255,255,255,.05);
+}
+.hero:after { content:""; position:absolute; width:260px; height:260px; right:-130px; top:-170px;
+    border:1px solid rgba(67,217,255,.22); border-radius:50%; box-shadow:0 0 40px rgba(67,217,255,.08); }
+.hero h1 { margin:0; font-size: clamp(2.25rem,5vw,4.3rem); letter-spacing:-.055em;
+    background: linear-gradient(90deg,#fff 15%,#a99aff 62%,#43d9ff); -webkit-background-clip:text; color:transparent; }
+.hero p { max-width:700px; color:#cbd0e8; font-size:1.02rem; margin:.7rem 0 0; }
+.kicker { color:#43d9ff; font-size:.72rem; font-weight:800; letter-spacing:.18em; text-transform:uppercase; }
+.search-panel, [data-testid="stContainer"] {
+    border: 1px solid rgba(166,150,255,.18) !important; border-radius:18px !important;
+    background: var(--glass) !important; box-shadow: 0 14px 38px rgba(0,0,0,.18); backdrop-filter: blur(14px);
+}
+.search-panel { padding:1.25rem 1.35rem; }
+[data-testid="stContainer"] { padding:1.25rem; }
+[data-testid="stTextInput"] input, [data-testid="stTextArea"] textarea,
+[data-testid="stNumberInput"] input, [data-baseweb="select"] > div, [data-baseweb="input"] > div {
+    background: rgba(8,10,20,.72) !important; border-color: rgba(166,150,255,.24) !important;
+    border-radius:12px !important; color:#f4f6ff !important;
+}
+[data-testid="stDateInput"] input { border-radius:12px !important; }
+.stButton > button, [data-testid="stLinkButton"] a {
+    border:1px solid rgba(166,150,255,.38); border-radius:12px; min-height:44px;
+    background: linear-gradient(100deg,#6651d9,#7c5cff 55%,#4abfdc); color:white;
+    box-shadow:0 8px 28px rgba(124,92,255,.22); font-weight:750;
+}
+.stButton > button:hover, [data-testid="stLinkButton"] a:hover { border-color:#43d9ff; box-shadow:0 8px 30px rgba(67,217,255,.18); }
+[data-testid="stSuccess"] { border:1px solid rgba(67,217,255,.22); background:rgba(67,217,255,.07); border-radius:12px; }
+[data-testid="stInfo"] { border:1px solid rgba(124,92,255,.22); background:rgba(124,92,255,.07); border-radius:12px; }
+[data-testid="stWarning"] { border:1px solid rgba(255,190,92,.20); background:rgba(255,190,92,.06); border-radius:12px; }
+[data-testid="stCaptionContainer"] { color:#9da4c4; }
+hr { border-color:rgba(166,150,255,.12); }
+.result-grid { margin-top:.5rem; }
+</style>
+
+<div class="hero">
+  <div class="kicker">NEXUS // EVENT DISCOVERY</div>
+  <h1>Hackathon Finder</h1>
+  <p>Search the live web for high-fit hackathons and let the AI filter signal from noise.</p>
+</div>
+""", unsafe_allow_html=True)
 
 left, right = st.columns(2)
 with left:
@@ -35,10 +89,8 @@ if st.button("Find hackathons", type="primary", use_container_width=True):
     elif event_format == "In-person" and not location.strip():
         st.warning("Enter a location for in-person events.")
     else:
-        args = dict(
-            age=int(age), event_format=event_format, location=location,
-        )
-        with st.spinner("Searching the web for hackathons..."):
+        args = dict(age=int(age), event_format=event_format, location=location)
+        with st.spinner("Scanning live event signals..."):
             if luna_is_configured():
                 result = search_with_luna(interests, details, start_date, end_date, **args)
                 if result.get("error") and serper_is_configured():
@@ -63,11 +115,11 @@ if result:
         events = filter_search_results(raw_results, start_date, end_date)
         removed = len(raw_results) - len(events)
         st.caption(f"Search provider: {result.get('search_provider', 'Search')}. Query: {result.get('query', '')}")
-        st.info("Known event dates outside the selected range are hidden. Results without reliable dates remain visible as unverified so the filter does not discard potentially relevant events.")
+        st.info("Known event dates outside the selected range are hidden. Results without reliable dates remain visible as unverified.")
         if events:
             st.success(f"Showing {len(events)} result(s).")
             if removed:
-                st.caption(f"Filtered out {removed} obvious directory/roundup or confirmed out-of-range result(s).")
+                st.caption(f"Filtered out {removed} directory/roundup or confirmed out-of-range result(s).")
             for index, item in enumerate(events, start=1):
                 with st.container(border=True):
                     st.markdown(f"### {index}. {item.get('title') or 'Untitled result'}")
@@ -89,7 +141,7 @@ if result:
                     if item.get("link"):
                         st.link_button("Open source page and verify", str(item["link"]))
         elif raw_results:
-            st.info("No results were returned after removing broad roundups and events confirmed to be outside the selected range.")
+            st.info("No results remained after removing broad roundups and confirmed out-of-range events.")
         else:
             st.info("The search provider returned no event results.")
 
